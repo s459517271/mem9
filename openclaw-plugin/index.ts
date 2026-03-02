@@ -311,50 +311,39 @@ const mnemoPlugin = {
     }
 
     if (cfg.apiUrl) {
-      if (!cfg.userToken && !cfg.apiToken) {
+      if (!cfg.userToken) {
         api.logger.error(
-          "[mnemo] Server mode requires apiUrl and (userToken or apiToken). Plugin disabled."
+          "[mnemo] Server mode requires apiUrl and userToken. Plugin disabled."
         );
         return;
       }
 
-      if (cfg.userToken) {
-        api.logger.info("[mnemo] Server mode (user token + workspace isolation)");
-        const spaceTokenCache = new Map<string, string>();
+      api.logger.info("[mnemo] Server mode (user token + workspace isolation)");
+      const spaceTokenCache = new Map<string, string>();
 
-        const factory: ToolFactory = (ctx: ToolContext) => {
-          const agentId = ctx.agentId ?? cfg.agentName ?? "agent";
-          const workspaceDir = ctx.workspaceDir ?? "default";
-          const cacheKey = `${workspaceDir}::${agentId}`;
+      const factory: ToolFactory = (ctx: ToolContext) => {
+        const agentId = ctx.agentId ?? cfg.agentName ?? "agent";
+        const workspaceDir = ctx.workspaceDir ?? "default";
+        const cacheKey = `${workspaceDir}::${agentId}`;
 
-          const cached = spaceTokenCache.get(cacheKey);
-          if (cached) {
-            return buildTools(new ServerBackend(cfg.apiUrl!, cached, agentId));
-          }
+        const cached = spaceTokenCache.get(cacheKey);
+        if (cached) {
+          return buildTools(new ServerBackend(cfg.apiUrl!, cached, agentId));
+        }
 
-          const workspaceKey = hashWorkspaceDir(workspaceDir);
-          const backend = new LazyServerBackend(
-            cfg.apiUrl!,
-            cfg.userToken!,
-            workspaceKey,
-            agentId,
-            spaceTokenCache,
-            cacheKey,
-          );
-          return buildTools(backend);
-        };
+        const workspaceKey = hashWorkspaceDir(workspaceDir);
+        const backend = new LazyServerBackend(
+          cfg.apiUrl!,
+          cfg.userToken!,
+          workspaceKey,
+          agentId,
+          spaceTokenCache,
+          cacheKey,
+        );
+        return buildTools(backend);
+      };
 
-        api.registerTool(factory, { names: toolNames });
-        return;
-      }
-
-      const agentName = cfg.agentName ?? "agent";
-      api.logger.info(`[mnemo] Server mode (legacy, agent: ${agentName})`);
-      const backend = new ServerBackend(cfg.apiUrl, cfg.apiToken!, agentName);
-      const tools = buildTools(backend);
-      api.registerTool(() => tools, {
-        names: toolNames,
-      });
+      api.registerTool(factory, { names: toolNames });
       return;
     }
 

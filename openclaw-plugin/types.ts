@@ -7,7 +7,6 @@ export interface PluginConfig {
 
   // Server mode (apiUrl present → server)
   apiUrl?: string;
-  apiToken?: string;
   userToken?: string;
 
   // Agent identity for CRDT vector clock (server mode only).
