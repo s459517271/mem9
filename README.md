@@ -95,7 +95,7 @@ The same plugin works in two modes — just change the config:
 | **Deploy** | Nothing — use TiDB Cloud free tier | Self-host `mnemo-server` |
 | **Config** | Database credentials | API URL + token |
 | **Vector search** | Yes (TiDB native VECTOR) | Yes (server-side) |
-| **Conflict resolution** | LWW (last writer wins) | LWW → LLM merge (Phase 2) |
+| **Conflict resolution** | LWW (last writer wins) | Vector Clock CRDT + LWW fallback |
 
 **Direct mode is the default.** Mode is inferred from config: `MNEMO_DB_HOST` → direct, `MNEMO_API_URL` → server.
 
@@ -133,7 +133,7 @@ For teams with multiple agents that need to share memory. Deploy a mnemo-server 
 - **Space isolation** — each team/project gets its own memory pool
 - **Per-agent tokens** — every agent instance gets a scoped API token
 - **Centralized control** — rate limiting, auth, and audit in one place
-- **LLM conflict merge (Phase 2)** — smart resolution when two agents update the same memory
+- **CRDT conflict resolution** — vector clock-based merge when two agents update the same memory concurrently
 
 ```bash
 # 1. Deploy server
@@ -202,6 +202,47 @@ export MNEMO_EMBED_BASE_URL="http://localhost:11434/v1"
 export MNEMO_EMBED_MODEL="nomic-embed-text"
 export MNEMO_EMBED_DIMS="768"
 ```
+
+## Multi-Agent Conflict Resolution (CRDT)
+
+When multiple agents write to the same memory concurrently, who wins? mnemos uses **vector clocks** — a proven distributed systems primitive — to detect and resolve conflicts without coordination.
+
+```
+Agent A writes key "deploy-config"       Agent B writes key "deploy-config"
+  clock: {A:3, B:1}                          clock: {A:2, B:2}
+         \                                     /
+          \                                   /
+           └──── Server compares clocks ─────┘
+                         │
+                 Neither dominates →
+                 Concurrent conflict!
+                         │
+              Deterministic tie-break
+            (agent name → ID, no randomness)
+                         │
+                  Winner's content saved
+                  Both clocks merged:
+                  {A:3, B:2}
+```
+
+**How it works:**
+
+| Scenario | What happens |
+|---|---|
+| A's clock dominates B's | A wins — newer write, B is stale |
+| B's clock dominates A's | B wins — A's write is outdated |
+| Neither dominates (concurrent) | Deterministic tie-break — no data loss, no randomness |
+| No clock sent (legacy client) | LWW fast path — backward compatible, same as Phase 1 |
+
+**Key design decisions:**
+
+- **Server-authoritative** — all merge logic lives in the Go server, not in plugins. Plugins stay simple.
+- **Tombstone deletion** — deletes are soft (`tombstone=true`) with clock increment. Prevents ghost resurrection when an agent hasn't seen a delete.
+- **Idempotent writes** — optional `write_id` for exactly-once semantics on retry.
+- **Zero coordination** — agents never talk to each other. The server detects concurrency from clocks alone.
+- **Backward compatible** — clients that don't send clocks get LWW (last writer wins), same as before.
+
+For the full design including implementation phases, tombstone revival rules, and the endpoint behavior matrix, see [`docs/DESIGN.md`](docs/DESIGN.md) and [`claude-notes/crdt-memory-proposal.md`](claude-notes/crdt-memory-proposal.md).
 
 ## API Reference (Server Mode)
 
@@ -287,8 +328,9 @@ mnemos/
 | Phase | What | Status |
 |-------|------|--------|
 | **Phase 1** | Core server + CRUD + auth + hybrid search + upsert + dual-mode plugins | ✅ Done |
-| **Phase 2** | LLM conflict merge, auto-tagging | 🔜 Planned |
-| **Phase 3** | Web dashboard, bulk import/export, CLI wizard | 📋 Planned |
+| **Phase 2** | Vector Clock CRDT for multi-agent conflict resolution | 📐 Designed ([proposal](claude-notes/crdt-memory-proposal.md)) |
+| **Phase 3** | LLM-assisted conflict merge, auto-tagging | 🔜 Planned |
+| **Phase 4** | Web dashboard, bulk import/export, CLI wizard | 📋 Planned |
 
 ## Contributing
 
