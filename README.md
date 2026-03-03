@@ -110,7 +110,7 @@ For individual developers. Connect your agent directly to TiDB Cloud — no serv
 |---|---|
 | Claude Code | **Marketplace**: `/plugin marketplace add qiffang/mnemos` then `/plugin install mnemo-memory@mnemos` <br/> **Manual**: See [`claude-plugin/README.md`](claude-plugin/README.md) |
 | OpenCode | `cd opencode-plugin && npm install` → add to `opencode.json` → set env vars |
-| OpenClaw | `cd openclaw-plugin && npm install` → add to `openclaw.json` |
+| OpenClaw | `npm install mnemo-openclaw` → add to `openclaw.json` |
 3. Set your database credentials (Claude Code / OpenCode use env vars, OpenClaw uses `openclaw.json` config):
 
 ```bash

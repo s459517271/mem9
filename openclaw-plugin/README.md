@@ -31,20 +31,21 @@ This is a `kind: "memory"` plugin — OpenClaw's framework manages when to load/
 
 ## Installation
 
-### 1. Clone this repo
+### Method A: npm install (Recommended)
+
+```bash
+npm install mnemo-openclaw
+```
+
+### Method B: From source
 
 ```bash
 git clone https://github.com/qiffang/mnemos.git
 cd mnemos/openclaw-plugin
-```
-
-### 2. Install dependencies
-
-```bash
 npm install
 ```
 
-### 3. Configure OpenClaw
+### Configure OpenClaw
 
 Add mnemo to your project's `openclaw.json`:
 
@@ -172,7 +173,7 @@ The plugin auto-detects the mode:
 - `host` present → **Direct mode**
 - `apiUrl` present → **Server mode**
 
-### 4. Verify
+### Verify
 
 Start OpenClaw. You should see one of these log lines:
 
@@ -210,7 +211,8 @@ Defined in `openclaw.plugin.json`:
 openclaw-plugin/
 ├── README.md              # This file
 ├── openclaw.plugin.json   # Plugin metadata + config schema
-├── package.json           # npm package config
+├── package.json           # npm package (mnemo-openclaw)
+├── tsconfig.json          # TypeScript config
 ├── index.ts               # Plugin entry point + tool registration
 ├── backend.ts             # MemoryBackend interface
 ├── direct-backend.ts      # Direct mode: @tidbcloud/serverless
