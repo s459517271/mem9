@@ -48,8 +48,12 @@ type taskListResponse struct {
 // createTask accepts a file upload and enqueues it for async ingest.
 // POST /v1alpha1/mem9s/{tenantID}/tasks
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		s.handleError(w, &domain.ValidationError{Message: "invalid multipart form: " + err.Error()})
+	// Limit request body size BEFORE ParseMultipartForm to prevent large temp file creation.
+	// This closes the body after maxUploadSize bytes, causing ParseMultipartForm to fail early.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		s.handleError(w, &domain.ValidationError{Message: "invalid multipart form or file too large: " + err.Error()})
 		return
 	}
 
