@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/qiffang/mnemos/server/internal/domain"
 	"github.com/qiffang/mnemos/server/internal/repository"
 	"github.com/qiffang/mnemos/server/internal/tenant"
@@ -175,5 +177,20 @@ func (s *TenantService) initSchema(ctx context.Context, t *domain.Tenant) error 
 	if _, err := db.ExecContext(ctx, buildMemorySchema(s.autoModel, s.autoDims)); err != nil {
 		return fmt.Errorf("init tenant schema: memories: %w", err)
 	}
+	if s.autoModel != "" {
+		_, err := db.ExecContext(ctx,
+			`ALTER TABLE memories ADD VECTOR INDEX idx_cosine ((VEC_COSINE_DISTANCE(embedding))) ADD_COLUMNAR_REPLICA_ON_DEMAND`)
+		if err != nil && !isIndexExistsError(err) {
+			return fmt.Errorf("init tenant schema: vector index: %w", err)
+		}
+	}
 	return nil
+}
+
+func isIndexExistsError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1061
+	}
+	return false
 }
