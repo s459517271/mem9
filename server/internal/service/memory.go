@@ -17,9 +17,10 @@ import (
 )
 
 const (
-	maxContentLen = 50000
-	maxTags       = 20
-	maxBulkSize   = 100
+	maxContentLen   = 50000
+	maxTags         = 20
+	maxBulkSize     = 100
+	defaultMinScore = 0.3
 )
 
 type MemoryService struct {
@@ -164,7 +165,7 @@ func (s *MemoryService) keywordOnlySearch(ctx context.Context, filter domain.Mem
 func (s *MemoryService) hybridSearch(ctx context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
-		limit = 50
+		limit = 10
 	}
 	offset := filter.Offset
 	if offset < 0 {
@@ -180,6 +181,20 @@ func (s *MemoryService) hybridSearch(ctx context.Context, filter domain.MemoryFi
 	vecResults, vecErr := s.memories.VectorSearch(ctx, queryVec, filter, fetchLimit)
 	if vecErr != nil {
 		return nil, 0, fmt.Errorf("vector search: %w", vecErr)
+	}
+
+	minScore := filter.MinScore
+	if minScore == 0 {
+		minScore = defaultMinScore
+	}
+	if minScore > 0 {
+		filtered := vecResults[:0]
+		for _, m := range vecResults {
+			if m.Score != nil && *m.Score >= minScore {
+				filtered = append(filtered, m)
+			}
+		}
+		vecResults = filtered
 	}
 
 	var kwResults []domain.Memory
@@ -211,7 +226,7 @@ func (s *MemoryService) hybridSearch(ctx context.Context, filter domain.MemoryFi
 func (s *MemoryService) autoHybridSearch(ctx context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
-		limit = 50
+		limit = 10
 	}
 	offset := filter.Offset
 	if offset < 0 {
@@ -222,6 +237,20 @@ func (s *MemoryService) autoHybridSearch(ctx context.Context, filter domain.Memo
 	vecResults, vecErr := s.memories.AutoVectorSearch(ctx, filter.Query, filter, fetchLimit)
 	if vecErr != nil {
 		return nil, 0, fmt.Errorf("auto vector search: %w", vecErr)
+	}
+
+	minScore := filter.MinScore
+	if minScore == 0 {
+		minScore = defaultMinScore
+	}
+	if minScore > 0 {
+		filtered := vecResults[:0]
+		for _, m := range vecResults {
+			if m.Score != nil && *m.Score >= minScore {
+				filtered = append(filtered, m)
+			}
+		}
+		vecResults = filtered
 	}
 
 	var kwResults []domain.Memory
@@ -274,10 +303,16 @@ func sortByScore(mems map[string]domain.Memory, scores map[string]float64) []dom
 	return result
 }
 
+// setScores sets the Score field on each memory.
+// It preserves the original cosine similarity from vector search when available
+// (set by VectorSearch/AutoVectorSearch as 1-distance), falling back to the
+// RRF fusion score for keyword-only results.
 func setScores(page []domain.Memory, scores map[string]float64) []domain.Memory {
 	for i := range page {
-		sc := scores[page[i].ID]
-		page[i].Score = &sc
+		if page[i].Score == nil {
+			sc := scores[page[i].ID]
+			page[i].Score = &sc
+		}
 	}
 	return page
 }

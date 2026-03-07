@@ -72,6 +72,15 @@ func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
 		Limit:      limit,
 		Offset:     offset,
 	}
+	if v := q.Get("min_score"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= -1 && f <= 1 {
+			if f == 0 {
+				filter.MinScore = -1
+			} else {
+				filter.MinScore = f
+			}
+		}
+	}
 	svc := s.resolveServices(auth)
 	memories, total, err := svc.memory.Search(r.Context(), filter)
 	if err != nil {
