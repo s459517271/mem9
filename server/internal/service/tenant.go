@@ -96,20 +96,20 @@ func (s *TenantService) Provision(ctx context.Context) (*ProvisionResult, error)
 	tenantID := instance.ID
 
 	t := &domain.Tenant{
-		ID:            tenantID,
-		Name:          tenantID, // Use ID as name for auto-provisioned tenants.
-		DBHost:        instance.Host,
-		DBPort:        instance.Port,
-		DBUser:        instance.Username,
-		DBPassword:    instance.Password,
-		DBName:        "test",
-		DBTLS:         true,
-		Provider:      "tidb_zero",
-		ClusterID:     instance.ID,
-		ClaimURL:      instance.ClaimURL,
+		ID:             tenantID,
+		Name:           tenantID, // Use ID as name for auto-provisioned tenants.
+		DBHost:         instance.Host,
+		DBPort:         instance.Port,
+		DBUser:         instance.Username,
+		DBPassword:     instance.Password,
+		DBName:         "test",
+		DBTLS:          true,
+		Provider:       "tidb_zero",
+		ClusterID:      instance.ID,
+		ClaimURL:       instance.ClaimURL,
 		ClaimExpiresAt: instance.ClaimExpiresAt,
-		Status:        domain.TenantProvisioning,
-		SchemaVersion: 0,
+		Status:         domain.TenantProvisioning,
+		SchemaVersion:  0,
 	}
 	if err := s.tenants.Create(ctx, t); err != nil {
 		return nil, fmt.Errorf("create tenant record: %w", err)

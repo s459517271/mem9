@@ -94,8 +94,8 @@ type Tenant struct {
 	DBTLS      bool   `json:"-"`
 
 	// Provisioning metadata
-	Provider  string `json:"provider"`
-	ClusterID string `json:"cluster_id,omitempty"`
+	Provider       string     `json:"provider"`
+	ClusterID      string     `json:"cluster_id,omitempty"`
 	ClaimURL       string     `json:"-"`
 	ClaimExpiresAt *time.Time `json:"-"`
 

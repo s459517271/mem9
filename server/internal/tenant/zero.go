@@ -17,12 +17,12 @@ type ZeroClient struct {
 }
 
 type ZeroInstance struct {
-	ID        string     `json:"id"`
-	Host      string     `json:"host"`
-	Port      int        `json:"port"`
-	Username  string     `json:"username"`
-	Password  string     `json:"password"`
-	ClaimURL  string     `json:"claim_url"`
+	ID             string     `json:"id"`
+	Host           string     `json:"host"`
+	Port           int        `json:"port"`
+	Username       string     `json:"username"`
+	Password       string     `json:"password"`
+	ClaimURL       string     `json:"claim_url"`
 	ClaimExpiresAt *time.Time `json:"claim_expires_at,omitempty"`
 }
 
