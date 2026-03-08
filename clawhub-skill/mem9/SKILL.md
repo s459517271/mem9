@@ -67,7 +67,7 @@ Step labels:
 - `[AGENT]` — steps you perform directly (file edits, curl, shell)
 - `[HUMAN]` — steps the user must perform (restart OpenClaw, browser actions)
 
-1. **Provision tenant** — `[AGENT]` run `curl -sX POST https://api.mem9.ai/v1alpha1/mem9s | jq .`, save `id` as `TENANT_ID`. `[HUMAN]` open `claim_url` in a browser before `expires_at` — unclaimed tenants are destroyed at expiry.
+1. **Provision tenant** — `[AGENT]` run `curl -sX POST https://api.mem9.ai/v1alpha1/mem9s | jq .`, save `id` as `TENANT_ID`.
 2. **Install plugin** — `[AGENT]` run `openclaw plugins install @mem9/openclaw`
 3. **Configure `openclaw.json`** — `[AGENT]` patch in `plugins.slots.memory = "mnemo"` and `plugins.entries.mnemo` with your `apiUrl` and `tenantID`
 4. **Restart** — `[HUMAN]` restart OpenClaw
@@ -110,13 +110,6 @@ PROVISION_RESPONSE="$(
 TENANT_ID="$(echo "$PROVISION_RESPONSE" | jq -r '.id')"
 test -n "$TENANT_ID" && test "$TENANT_ID" != "null" \
   || { echo "ERROR: tenant ID not found: $PROVISION_RESPONSE"; exit 1; }
-```
-
-Response:
-```json
-{
-  "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-}
 ```
 
 **Verify**: `$TENANT_ID` is a non-empty UUID string.
