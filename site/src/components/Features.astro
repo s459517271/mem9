@@ -1,0 +1,73 @@
+---
+import FeatureCard from './FeatureCard.astro';
+
+const features = [
+  {
+    icon: '01',
+    title: 'Instant persistent storage',
+    description: 'Spin up a durable memory backend in seconds. No schema design, no control plane, no ops. Your agent writes - mem9 persists.',
+  },
+  {
+    icon: '02',
+    title: 'Hybrid search, zero config',
+    description: 'Keyword search works out of the box. Add embeddings and mem9 automatically upgrades to vector + keyword - no re-indexing, no pipeline changes.',
+  },
+  {
+    icon: '03',
+    title: 'Memory that follows your agent',
+    description: "Close the tab. Restart the machine. Switch devices. Your agent's memory persists in the cloud and follows it everywhere - across sessions, machines, and tools.",
+  },
+  {
+    icon: '04',
+    title: 'Open source, self-hostable',
+    description: "Apache-2.0 Go server, TypeScript plugins, and bash hooks. Run it on our cloud or bring it home. Your agent's memory, your infrastructure.",
+  },
+];
+---
+
+<section id="features" class="features">
+  <div class="container">
+    <div class="section-head">
+      <p class="section-kicker">Features</p>
+      <h2 class="section-title">Persistent memory, zero plumbing</h2>
+      <p class="section-desc">
+        Stop duct-taping databases, vector stores, and sync scripts together. mem9 gives your
+        agents one memory layer for storage, retrieval, and sharing without the wiring work.
+      </p>
+    </div>
+    <div class="grid">
+      {features.map((f) => (
+        <FeatureCard icon={f.icon} title={f.title} description={f.description} />
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .features {
+    padding: 4rem 0;
+  }
+
+  .section-title {
+    max-width: 11ch;
+  }
+
+  .section-head {
+    width: min(100%, var(--content-rail));
+    margin: 0 auto 2.4rem;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+    width: min(100%, var(--section-grid));
+    margin: 0 auto;
+  }
+
+  @media (max-width: 640px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

@@ -1,0 +1,392 @@
+---
+const onboardingCommand =
+  'Read https://mem9.ai/SKILL.md and follow the instructions to install and configure mem9 for OpenClaw';
+const highlights = [
+  {
+    title: 'Never forget again',
+    description: 'Cloud-persistent memory that survives resets, restarts, and machine switches.',
+  },
+  {
+    title: 'Securely backed up',
+    description: 'Your agent memory lives in durable cloud storage, not fragile local files.',
+  },
+  {
+    title: 'Seamless onboarding',
+    description:
+      'Start with one instruction, then bring over existing memory without breaking your flow.',
+  },
+];
+---
+
+<section class="hero">
+  <div class="container hero-shell">
+    <div class="hero-copy">
+      <p class="eyebrow">MEM9.AI</p>
+
+      <h1 class="title">
+        <span class="title-line">Unlimited memory</span>
+        <span class="title-muted"><span class="title-inline">for OpenClaw<span class="cursor"></span></span></span>
+      </h1>
+      <p class="subtitle">
+        Your agents forget everything between sessions. mem9 fixes that. Persistent memory
+        infrastructure with hybrid search, shared spaces, and cross-agent recall - from first
+        write to forever.
+      </p>
+
+      <div class="cta-grid">
+        <div class="cta-card surface-card">
+          <p class="cta-label">Agent Onboarding</p>
+          <div class="cta-command">
+            <code>{onboardingCommand}</code>
+            <button
+              type="button"
+              class="copy-button"
+              data-copy-text={onboardingCommand}
+              aria-label="Copy onboarding instructions"
+              title="Copy onboarding instructions"
+            >
+              <svg class="copy-icon copy-icon-default" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M9 9a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.7"
+                />
+                <path
+                  d="M15 7V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h1"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.7"
+                />
+              </svg>
+              <svg class="copy-icon copy-icon-success" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M20 7L10 17l-5-5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-highlights">
+        {highlights.map((highlight) => (
+          <article class="highlight-card surface-card">
+            <h2 class="highlight-title">{highlight.title}</h2>
+            <p class="highlight-description">{highlight.description}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    display: flex;
+    align-items: center;
+    min-height: calc(100dvh - 70px);
+    padding: clamp(2.25rem, 5vh, 5rem) 0 clamp(1.6rem, 3.4vh, 3rem);
+  }
+
+  .hero-shell {
+    position: relative;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  .hero-copy {
+    width: min(100%, var(--content-rail));
+    margin: 0 auto;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    letter-spacing: 0.22em;
+    color: var(--accent);
+    margin-bottom: 1rem;
+  }
+
+  .title {
+    font-size: clamp(3.125rem, 4.7vw, 3.75rem);
+    line-height: 1.08;
+    max-width: 9.2ch;
+    margin-bottom: 1rem;
+  }
+
+  .title-line {
+    display: inline-block;
+    white-space: nowrap;
+  }
+
+  .title-muted {
+    display: block;
+    color: rgba(255, 255, 255, 0.62);
+    margin-top: 0.06em;
+  }
+
+  .title-inline {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.02em;
+    white-space: nowrap;
+  }
+
+  .subtitle {
+    font-size: clamp(1.0625rem, 1.4vw, 1.125rem);
+    color: var(--text-dim);
+    max-width: 576px;
+    line-height: 1.79;
+    margin-bottom: 1.5rem;
+  }
+
+  .cta-grid {
+    width: min(100%, var(--content-rail));
+    margin-bottom: 0.85rem;
+  }
+
+  .cta-card {
+    padding: 1rem 1rem 1.05rem;
+    min-height: 132px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .cta-label {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+  }
+
+  .cta-card code {
+    display: block;
+    flex: 1;
+    font-size: 0.96rem;
+    color: var(--white-soft);
+    line-height: 1.55;
+    word-break: break-word;
+  }
+
+  .cta-command {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.9rem;
+  }
+
+  .copy-button {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    min-height: 34px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 0.7rem;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--white-soft);
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+  }
+
+  .copy-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .copy-icon-success {
+    display: none;
+  }
+
+  .copy-button:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--border-strong);
+  }
+
+  .copy-button.is-copied {
+    color: var(--accent);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .copy-button.is-copied .copy-icon-default {
+    display: none;
+  }
+
+  .copy-button.is-copied .copy-icon-success {
+    display: block;
+  }
+
+  .hero-highlights {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.85rem;
+    width: min(100%, var(--content-rail));
+  }
+
+  .highlight-card {
+    min-height: 140px;
+    padding: 1rem 1rem 1.05rem;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .highlight-title {
+    font-size: 1rem;
+    letter-spacing: -0.03em;
+    margin-bottom: 0.6rem;
+    color: var(--text);
+  }
+
+  .highlight-description {
+    font-size: 0.95rem;
+    line-height: 1.58;
+    color: var(--text-dim);
+  }
+
+  @media (min-width: 900px) and (max-height: 980px) {
+    .hero {
+      min-height: calc(100dvh - 70px);
+      padding-top: 1.7rem;
+      padding-bottom: 1.25rem;
+    }
+
+    .eyebrow {
+      margin-bottom: 0.85rem;
+    }
+
+    .title {
+      font-size: clamp(3rem, 4.7vw, 3.75rem);
+      line-height: 1.08;
+      max-width: 9.2ch;
+      margin-bottom: 0.9rem;
+    }
+
+    .subtitle {
+      font-size: 1.0625rem;
+      line-height: 1.79;
+      max-width: 576px;
+      margin-bottom: 1.35rem;
+    }
+
+    .cta-card {
+      min-height: 122px;
+      padding: 0.9rem 0.95rem 1rem;
+    }
+
+    .cta-label {
+      margin-bottom: 0.8rem;
+    }
+  }
+
+  @media (min-width: 900px) and (max-height: 860px) {
+    .hero {
+      padding-top: 1.2rem;
+      padding-bottom: 1rem;
+    }
+
+    .title {
+      font-size: clamp(3rem, 4.7vw, 3.75rem);
+      line-height: 1.08;
+      max-width: 9.2ch;
+    }
+
+    .subtitle {
+      font-size: 1.125rem;
+      line-height: 1.79;
+      margin-bottom: 1.1rem;
+    }
+
+    .cta-card code {
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+
+    .highlight-card {
+      min-height: 128px;
+      padding: 0.95rem;
+    }
+
+    .highlight-title {
+      font-size: 0.95rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .highlight-description {
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .hero-copy {
+      width: 100%;
+    }
+
+    .title {
+      max-width: 7.6ch;
+    }
+
+    .cta-command {
+      flex-direction: column;
+    }
+
+    .hero-highlights {
+      grid-template-columns: 1fr;
+    }
+
+    .highlight-card {
+      min-height: 0;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .hero {
+      padding-top: 4.2rem;
+    }
+
+    .eyebrow {
+      font-size: 0.74rem;
+      letter-spacing: 0.2em;
+    }
+
+    .subtitle {
+      font-size: 1.04rem;
+    }
+  }
+</style>
+
+<script>
+  const copyButton = document.querySelector('.copy-button');
+
+  copyButton?.addEventListener('click', async () => {
+    const text = copyButton.getAttribute('data-copy-text');
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      copyButton.classList.add('is-copied');
+
+      window.setTimeout(() => {
+        copyButton.classList.remove('is-copied');
+      }, 1600);
+    } catch {
+      copyButton.classList.add('is-copied');
+
+      window.setTimeout(() => {
+        copyButton.classList.remove('is-copied');
+      }, 1600);
+    }
+  });
+</script>

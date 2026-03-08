@@ -1,0 +1,132 @@
+/* Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom properties */
+:root {
+  --bg-deep: #0a0a0a;
+  --bg-elevated: #0d0d0d;
+  --bg-card: rgba(255, 255, 255, 0.035);
+  --bg-terminal: #101010;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --text: #f4f4f1;
+  --text-dim: #ababab;
+  --text-soft: #777777;
+  --accent: #d8d8d3;
+  --accent-soft: rgba(255, 255, 255, 0.12);
+  --white-soft: #f4f4f1;
+  --red: #ff5f56;
+  --yellow: #ffbd2e;
+  --green-dot: #d9d9d9;
+  --font-display: 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-body: 'DM Sans', sans-serif;
+  --max-w: 1180px;
+  --content-rail: 768px;
+  --section-grid: 768px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--bg-deep);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image: none;
+}
+
+a {
+  color: var(--white-soft);
+  text-decoration: none;
+  transition: opacity 0.2s, color 0.2s, border-color 0.2s, background-color 0.2s;
+}
+a:hover {
+  color: var(--white-soft);
+  opacity: 0.92;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+}
+
+code {
+  font-family: var(--font-mono);
+}
+
+.container {
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* Section spacing */
+section {
+  padding: 5.5rem 0;
+}
+
+.section-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.8rem;
+}
+
+.section-title {
+  font-size: clamp(2rem, 4vw, 3rem);
+  margin-bottom: 0.8rem;
+}
+
+.section-desc {
+  max-width: 720px;
+  color: var(--text-dim);
+  font-size: 1.05rem;
+}
+
+.surface-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* Blinking cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor {
+  display: inline-block;
+  width: 0.42em;
+  height: 0.11em;
+  background: var(--accent);
+  border-radius: 999px;
+  margin-left: 0.08em;
+  vertical-align: baseline;
+  transform: translateY(0.14em);
+  animation: blink 1s step-end infinite;
+}
+
+@media (max-width: 600px) {
+  section {
+    padding: 4.5rem 0;
+  }
+
+  .section-desc {
+    font-size: 1rem;
+  }
+}

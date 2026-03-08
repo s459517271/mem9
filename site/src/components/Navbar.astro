@@ -1,0 +1,77 @@
+<nav class="nav">
+  <div class="container nav-inner">
+    <a href="/" class="brand" aria-label="mem9 home">
+      <span class="brand-text">MEM</span>
+      <span class="brand-accent">9</span>
+    </a>
+
+    <div class="nav-links">
+      <a href="#top">Home</a>
+      <a href="#features">Features</a>
+      <a href="#platforms">Platforms</a>
+    </div>
+  </div>
+</nav>
+
+<style>
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    backdrop-filter: blur(14px);
+    background: rgba(10, 10, 10, 0.92);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav-inner {
+    min-height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.08em;
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: var(--text);
+  }
+
+  .brand-accent {
+    color: var(--accent);
+  }
+
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 1.6rem;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+  }
+
+  .nav-links a {
+    color: inherit;
+  }
+
+  @media (max-width: 780px) {
+    .nav-inner {
+      min-height: 62px;
+    }
+
+    .nav-links {
+      gap: 0.9rem;
+      font-size: 0.87rem;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .nav-links a {
+      display: none;
+    }
+  }
+</style>
