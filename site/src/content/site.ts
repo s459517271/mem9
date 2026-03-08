@@ -1,4 +1,4 @@
-export type SiteLocale = 'en' | 'zh' | 'ja' | 'ko' | 'id' | 'th';
+export type SiteLocale = 'en' | 'zh' | 'zh-Hant' | 'ja' | 'ko' | 'id' | 'th';
 export type SiteThemePreference = 'light' | 'dark' | 'system';
 export type SiteResolvedTheme = 'light' | 'dark';
 
@@ -100,7 +100,17 @@ export const DEFAULT_LOCALE: SiteLocale = 'en';
 export const DEFAULT_THEME_PREFERENCE: SiteThemePreference = 'system';
 export const LOCALE_STORAGE_KEY = 'mem9.locale';
 export const THEME_STORAGE_KEY = 'mem9.theme';
-export const siteLocales: SiteLocale[] = ['en', 'zh', 'ja', 'ko', 'id', 'th'];
+export const siteLocales: SiteLocale[] = ['en', 'zh', 'zh-Hant', 'ja', 'ko', 'id', 'th'];
+
+const localeNames: Record<SiteLocale, string> = {
+  en: 'EN',
+  zh: '中文（简体）',
+  'zh-Hant': '中文（繁體）',
+  ja: '日本語',
+  ko: '한국어',
+  id: 'Indonesian',
+  th: 'ไทย',
+};
 
 export const siteCopy: Record<SiteLocale, SiteDictionary> = {
   en: {
@@ -212,14 +222,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: 'Onboarding instructions copied.',
       copyFailed: 'Copy failed. Please copy the command manually.',
     },
-    localeNames: {
-      en: 'EN',
-      zh: '中文',
-      ja: '日本語',
-      ko: '한국어',
-      id: 'Bahasa Indonesia',
-      th: 'ไทย',
-    },
+    localeNames,
   },
   zh: {
     meta: {
@@ -327,14 +330,115 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: '已复制接入说明。',
       copyFailed: '复制失败，请手动复制命令。',
     },
-    localeNames: {
-      en: 'EN',
-      zh: '中文',
-      ja: '日本語',
-      ko: '한국어',
-      id: 'Bahasa Indonesia',
-      th: 'ไทย',
+    localeNames,
+  },
+  'zh-Hant': {
+    meta: {
+      title: 'mem9 - 面向 OpenClaw 的無限記憶基礎設施',
+      description:
+        'mem9.ai 為 OpenClaw 提供無限記憶基礎設施，支援持久召回、混合搜尋，以及面向 Claude Code、OpenCode、OpenClaw 和自訂工具的多 Agent 上下文共享。',
     },
+    nav: {
+      home: '首頁',
+      features: '能力',
+      platforms: '平台',
+    },
+    hero: {
+      eyebrow: 'MEM9.AI',
+      titleLead: '無限記憶',
+      titleAccent: 'for OpenClaw',
+      subtitle:
+        '你的 Agent 會在每次會話結束後忘掉一切，mem9 負責修復這件事。它提供持久化記憶基礎設施，支援混合搜尋、共享空間和跨 Agent 召回，從第一次寫入一路保留到未來。',
+      onboardingLabel: 'Agent 接入',
+      onboardingCommand:
+        '閱讀 https://mem9.ai/SKILL.md，按照說明為 OpenClaw 安裝並配置 mem9',
+      highlights: [
+        {
+          title: '不再遺忘',
+          description: '雲端持久記憶可跨越重設、重啟和裝置切換持續保留。',
+        },
+        {
+          title: '安全備份',
+          description: '你的 Agent 記憶存放在耐久雲端儲存中，而不是脆弱的本地檔案。',
+        },
+        {
+          title: '無縫接入',
+          description: '從一條指令開始，再逐步遷移既有記憶，不會打斷現有工作流。',
+        },
+      ],
+    },
+    features: {
+      kicker: '能力',
+      title: '持久記憶，無需自己拼管線',
+      description:
+        '別再把資料庫、向量庫和同步腳本硬湊在一起。mem9 為你的 Agent 提供統一記憶層，一次解決儲存、檢索和共享。',
+      items: [
+        {
+          icon: '01',
+          title: '即時持久化儲存',
+          description:
+            '幾秒內就能啟動耐久記憶後端。無需設計 schema，無需控制面，無需運維。你的 Agent 負責寫入，mem9 負責持久化。',
+        },
+        {
+          icon: '02',
+          title: '混合搜尋，零配置',
+          description:
+            '關鍵詞搜尋開箱即用。補上 embeddings 後，mem9 會自動升級為向量加關鍵詞混合檢索，無需重建索引，也無需改動流水線。',
+        },
+        {
+          icon: '03',
+          title: '記憶跟著 Agent 走',
+          description:
+            '關掉分頁、重啟機器、切換裝置都沒問題。你的 Agent 記憶持續存在於雲端，跨會話、跨機器、跨工具一路跟隨。',
+        },
+        {
+          icon: '04',
+          title: '開源且可自託管',
+          description:
+            '提供 Apache-2.0 的 Go 服務端、TypeScript 外掛和 bash hooks。你可以使用我們的雲，也可以完全帶回自己的基礎設施。',
+        },
+      ],
+    },
+    platforms: {
+      kicker: '平台',
+      title: '一層記憶，覆蓋每個 Agent。',
+      description:
+        'Agent 在切換工具時不該丟掉上下文。mem9 為你的整套 Agent 堆疊提供共享且持久的記憶層，始終可搜尋、可同步、可長期保存。',
+      items: [
+        {
+          name: 'OpenClaw',
+          desc: '無限記憶',
+          detail:
+            '為你的 OpenClaw Agent 提供永不過期的記憶。回想過去的對話，重用已學到的知識，並在一輪又一輪會話中保持一致。',
+        },
+      ],
+      note: '任何能夠透過 mem9 API 層讀寫的客戶端也都可以接入。',
+    },
+    footer: {
+      github: 'GitHub',
+      license: 'Apache-2.0',
+      contributing: '參與貢獻',
+      copyright: 'mem9.ai。為 AI Agents 提供無限記憶基礎設施。',
+    },
+    aria: {
+      home: 'mem9 首頁',
+      changeLanguage: '切換語言',
+      changeTheme: '切換主題',
+      themeModeLight: '主題模式：淺色',
+      themeModeDark: '主題模式：深色',
+      themeModeSystem: '主題模式：跟隨系統',
+      copyOnboarding: '複製接入說明',
+    },
+    themeOptions: {
+      light: '淺色',
+      dark: '深色',
+      system: '跟隨系統',
+    },
+    copyFeedback: {
+      copied: '已複製接入說明。',
+      copyFailed: '複製失敗，請手動複製命令。',
+    },
+    localeNames,
   },
   ja: {
     meta: {
@@ -445,14 +549,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: '導入手順をコピーしました。',
       copyFailed: 'コピーに失敗しました。手動でコピーしてください。',
     },
-    localeNames: {
-      en: 'EN',
-      zh: '中文',
-      ja: '日本語',
-      ko: '한국어',
-      id: 'Bahasa Indonesia',
-      th: 'ไทย',
-    },
+    localeNames,
   },
   ko: {
     meta: {
@@ -560,14 +657,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: '온보딩 안내를 복사했습니다.',
       copyFailed: '복사에 실패했습니다. 직접 복사해 주세요.',
     },
-    localeNames: {
-      en: 'EN',
-      zh: '中文',
-      ja: '日本語',
-      ko: '한국어',
-      id: 'Bahasa Indonesia',
-      th: 'ไทย',
-    },
+    localeNames,
   },
   id: {
     meta: {
@@ -678,14 +768,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: 'Instruksi onboarding disalin.',
       copyFailed: 'Gagal menyalin. Silakan salin manual.',
     },
-    localeNames: {
-      en: 'EN',
-      zh: '中文',
-      ja: '日本語',
-      ko: '한국어',
-      id: 'Bahasa Indonesia',
-      th: 'ไทย',
-    },
+    localeNames,
   },
   th: {
     meta: {
@@ -796,14 +879,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: 'คัดลอกคำแนะนำการตั้งค่าแล้ว',
       copyFailed: 'คัดลอกไม่สำเร็จ กรุณาคัดลอกด้วยตนเอง',
     },
-    localeNames: {
-      en: 'EN',
-      zh: '中文',
-      ja: '日本語',
-      ko: '한국어',
-      id: 'Bahasa Indonesia',
-      th: 'ไทย',
-    },
+    localeNames,
   },
 };
 
@@ -811,6 +887,7 @@ export function isSiteLocale(value: string | null | undefined): value is SiteLoc
   return (
     value === 'en' ||
     value === 'zh' ||
+    value === 'zh-Hant' ||
     value === 'ja' ||
     value === 'ko' ||
     value === 'id' ||

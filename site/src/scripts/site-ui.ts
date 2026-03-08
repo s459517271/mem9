@@ -48,6 +48,15 @@ function resolveBrowserLocale(): SiteLocale {
     const normalized = locale.toLowerCase();
 
     if (normalized.startsWith('zh')) {
+      if (
+        normalized.startsWith('zh-hant') ||
+        normalized.startsWith('zh-tw') ||
+        normalized.startsWith('zh-hk') ||
+        normalized.startsWith('zh-mo')
+      ) {
+        return 'zh-Hant';
+      }
+
       return 'zh';
     }
 
@@ -73,6 +82,18 @@ function resolveBrowserLocale(): SiteLocale {
   }
 
   return DEFAULT_LOCALE;
+}
+
+function localeToLang(locale: SiteLocale): string {
+  if (locale === 'zh') {
+    return 'zh-CN';
+  }
+
+  if (locale === 'zh-Hant') {
+    return 'zh-Hant';
+  }
+
+  return locale;
 }
 
 function readPreferredLocale(): SiteLocale {
@@ -159,7 +180,7 @@ function applyTheme(
 }
 
 function updateMeta(locale: SiteLocale, dictionary: SiteDictionary): void {
-  document.documentElement.lang = locale === 'zh' ? 'zh-CN' : locale;
+  document.documentElement.lang = localeToLang(locale);
   document.title = dictionary.meta.title;
 
   const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');

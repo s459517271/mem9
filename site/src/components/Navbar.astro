@@ -90,6 +90,14 @@ const { nav, aria, localeNames, themeOptions } = Astro.props;
             <button
               type="button"
               class="menu-option"
+              data-set-locale="zh-Hant"
+              aria-pressed="false"
+            >
+              {localeNames['zh-Hant']}
+            </button>
+            <button
+              type="button"
+              class="menu-option"
               data-set-locale="ja"
               aria-pressed="false"
             >
