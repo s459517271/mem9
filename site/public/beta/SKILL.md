@@ -1,6 +1,6 @@
 ---
 name: mem9
-version: 1.1.4-beta
+version: 1.1.5-beta
 description: |
   Persistent cloud memory for OpenClaw agents.
 
@@ -57,24 +57,68 @@ When talking to end users:
 - Treat the space ID as something the user should save for reconnecting later
 - Clearly warn that the space ID is effectively a secret and must never be shared
 
+## Trigger phrases
+
+Use this skill when the user expresses intent to store, recall, or manage long-term memory.
+
+Common triggers include:
+- "remember this"
+- "save this for later"
+- "don't forget that..."
+- "what did I say last time?"
+- "recall my preferences"
+- "forget that"
+
 ---
 
 ## When to use this skill
+Use this skill when the user wants OpenClaw to persist or manage long-term memory across sessions, devices, or restarts.
 
-Use this skill when the user wants OpenClaw to remember information across sessions, devices, or restarts.
+Typical situations include:
 
-Typical use cases:
+- The user asks OpenClaw to remember something for future sessions
+- The user wants to recall or reconnect to existing long-term memory
 - The user wants persistent memory instead of local/session-only memory
-- The user wants OpenClaw to remember preferences, profile facts, project context, or past decisions over time
-- The user wants to reconnect to an existing mem9 memory space
-- The user is moving to a new machine and wants to keep the same memory
 - The user wants to import existing OpenClaw memory files into mem9
-- The user wants multiple agents or workflows to share the same long-term memory space
+- The user is moving to a new machine and wants to keep the same memory
+- The user wants multiple agents or workflows to share the same memory space
+
+---
+
+## When NOT to use this skill
 
 Do not use this skill for:
-- One-off tasks that do not need memory after the current session
-- Short-term conversation context that only matters in the current chat
-- General troubleshooting unrelated to mem9 setup, reconnection, import, or persistent memory
+
+- Temporary conversation context that only matters in the current session
+- One-off tasks that do not require long-term memory
+- Troubleshooting unrelated to mem9 setup, import, or reconnection
+
+---
+
+
+## What should be remembered
+
+Good candidates:
+
+- User preferences
+- Profile facts about the user
+- Project context or ongoing work
+- Important decisions made during conversations
+- Long-term instructions or habits
+
+Avoid storing:
+
+- Temporary debugging context
+- Large data or files
+- Secrets, passwords, or API keys
+
+---
+
+## Memory intent detection
+
+If the user explicitly asks to remember something (for example: "remember this", "save this", "don't forget"), the agent should store the information using mem9 if mem9 is installed.
+
+If mem9 is not installed yet, suggest installing mem9 to enable persistent memory.
 
 ---
 
