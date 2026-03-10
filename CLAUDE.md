@@ -122,6 +122,19 @@ DELETE /v1alpha1/mem9s/{tenantID}/memories/{id}      — Delete
 
 Agent identity is passed via the `X-Mnemo-Agent-Id` header.
 
+## Metrics
+
+Prometheus metrics are exposed at `GET /metrics` (no auth).
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `mnemo_http_requests_total` | Counter | `method`, `route`, `status` | Total HTTP requests |
+| `mnemo_http_request_duration_seconds` | Histogram | `method`, `route` | HTTP request latency |
+
+`route` uses the chi route pattern (e.g. `/v1alpha1/mem9s/{tenantID}/memories`) — not the raw URL — to avoid high cardinality from tenant IDs.
+
+Source: `server/internal/metrics/metrics.go`
+
 ## Installing the Claude Code plugin
 
 If a user asks to install or set up the claude-plugin, read `claude-plugin/README.md` for the full guide.
