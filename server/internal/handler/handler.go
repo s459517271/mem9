@@ -194,15 +194,25 @@ func authInfo(r *http.Request) *domain.AuthInfo {
 }
 
 // requestLogger returns a middleware that logs each request.
+// It uses the chi route pattern (e.g. /v1alpha1/mem9s/{tenantID}/memories)
+// instead of the raw URL path to avoid logging sensitive tenant IDs.
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(ww, r)
+			// Use route pattern to avoid exposing sensitive path params (e.g. tenantID).
+			routeCtx := chi.RouteContext(r.Context())
+			path := r.URL.Path
+			if routeCtx != nil {
+				if pattern := routeCtx.RoutePattern(); pattern != "" {
+					path = pattern
+				}
+			}
 			logger.Info("request",
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", path,
 				"status", ww.Status(),
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", chimw.GetReqID(r.Context()),
