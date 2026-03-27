@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/qiffang/mnemos/server/internal/metrics"
 )
 
 type Client struct {
@@ -70,6 +72,7 @@ type chatRequest struct {
 	Messages       []Message       `json:"messages"`
 	Temperature    float64         `json:"temperature"`
 	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+	EnableThinking *bool           `json:"enable_thinking,omitempty"`
 }
 
 type chatResponse struct {
@@ -121,12 +124,36 @@ func (c *Client) complete(ctx context.Context, system, user string, respFmt *res
 		{Role: "user", Content: user},
 	}
 
-	body, err := json.Marshal(chatRequest{
+	enableThinking := disableThinkingOptions(c.model)
+
+	result, err := c.doRequest(ctx, chatRequest{
 		Model:          c.model,
 		Messages:       messages,
 		Temperature:    c.temperature,
 		ResponseFormat: respFmt,
+		EnableThinking: enableThinking,
 	})
+	if err != nil {
+		// If 400 and thinking parameters were sent, retry without them (provider may not support them).
+		var httpErr *HTTPStatusError
+		if errors.As(err, &httpErr) && httpErr.Code == http.StatusBadRequest && enableThinking != nil {
+			slog.Warn("LLM rejected thinking parameters (HTTP 400), retrying without them", "model", c.model)
+			return c.doRequest(ctx, chatRequest{
+				Model:          c.model,
+				Messages:       messages,
+				Temperature:    c.temperature,
+				ResponseFormat: respFmt,
+			})
+		}
+	}
+	return result, err
+}
+
+// doRequest sends a single chat completion request and handles metrics/response parsing.
+func (c *Client) doRequest(ctx context.Context, cr chatRequest) (string, error) {
+	start := time.Now()
+
+	body, err := json.Marshal(cr)
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
@@ -140,6 +167,7 @@ func (c *Client) complete(ctx context.Context, system, user string, respFmt *res
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		metrics.LLMRequestDuration.WithLabelValues(c.model, "error").Observe(time.Since(start).Seconds())
 		return "", fmt.Errorf("llm request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -149,21 +177,27 @@ func (c *Client) complete(ctx context.Context, system, user string, respFmt *res
 		return "", fmt.Errorf("read response: %w", err)
 	}
 
+	duration := time.Since(start).Seconds()
+
 	// Surface HTTP errors as typed errors so callers can detect specific status codes.
 	if resp.StatusCode >= 400 {
+		metrics.LLMRequestDuration.WithLabelValues(c.model, "error").Observe(duration)
 		return "", &HTTPStatusError{Code: resp.StatusCode, Body: string(respBody)}
 	}
 
 	var chatResp chatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		metrics.LLMRequestDuration.WithLabelValues(c.model, "error").Observe(duration)
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 
 	if chatResp.Error != nil {
+		metrics.LLMRequestDuration.WithLabelValues(c.model, "error").Observe(duration)
 		return "", fmt.Errorf("llm error: %s", chatResp.Error.Message)
 	}
 
 	if len(chatResp.Choices) == 0 {
+		metrics.LLMRequestDuration.WithLabelValues(c.model, "error").Observe(duration)
 		return "", fmt.Errorf("llm returned no choices")
 	}
 
@@ -171,11 +205,21 @@ func (c *Client) complete(ctx context.Context, system, user string, respFmt *res
 	if c.debugLLM {
 		slog.Debug("llm raw response", "model", c.model, "len", len(content), "raw", content)
 	}
+
+	metrics.LLMRequestDuration.WithLabelValues(c.model, "success").Observe(duration)
 	return content, nil
 }
 
 func (c *Client) DebugLLM() bool {
 	return c.debugLLM
+}
+
+func disableThinkingOptions(model string) *bool {
+	if strings.Contains(strings.ToLower(model), "qwen") {
+		enableThinking := false
+		return &enableThinking
+	}
+	return nil
 }
 
 func StripMarkdownFences(s string) string {
