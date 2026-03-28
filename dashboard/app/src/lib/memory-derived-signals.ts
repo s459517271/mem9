@@ -9,6 +9,7 @@ import type { Memory } from "@/types/memory";
 
 export type DerivedTagOrigin = "raw" | "derived" | "mixed";
 export type DerivedTagSource = "structured" | "named_term" | "segmented";
+type DerivedSignalMemory = Pick<Memory, "id" | "content" | "tags">;
 
 export interface MemoryDerivedTagCandidate {
   source: DerivedTagSource;
@@ -37,7 +38,7 @@ export interface LocalDerivedSignalIndex {
 }
 
 interface BuildLocalDerivedSignalIndexInput {
-  memories: Memory[];
+  memories: DerivedSignalMemory[];
   matchMap?: Map<string, MemoryAnalysisMatch> | null;
   memoryAnalyses?: MemoryDerivedAnalysis[] | Map<string, MemoryDerivedAnalysis> | null;
 }
@@ -415,7 +416,7 @@ function addCandidate(
   }
 }
 
-function collectMemoryCandidates(memory: Memory): MemoryDerivedTagCandidate[] {
+function collectMemoryCandidates(memory: Pick<Memory, "content">): MemoryDerivedTagCandidate[] {
   const candidates = new Map<string, MemoryDerivedTagCandidate>();
   const entities = extractMemoryInsightEntities(memory);
   const personLikeLabels = new Set(
@@ -441,7 +442,7 @@ function collectMemoryCandidates(memory: Memory): MemoryDerivedTagCandidate[] {
   return [...candidates.values()];
 }
 
-export function createMemoryDerivedAnalysis(memory: Memory): MemoryDerivedAnalysis {
+export function createMemoryDerivedAnalysis(memory: DerivedSignalMemory): MemoryDerivedAnalysis {
   return {
     memoryId: memory.id,
     rawTags: filterLowSignalAggregationTags(memory.tags),
@@ -466,7 +467,7 @@ function getMaxCategoryCount(categoryCounts: Map<string, number>): number {
 }
 
 function buildTagStats(
-  memories: Memory[],
+  memories: DerivedSignalMemory[],
   rawTagsByMemoryId: Map<string, string[]>,
   derivedTagsByMemoryId: Map<string, string[]>,
 ): {

@@ -214,10 +214,18 @@ describe("MemoryOverviewTabs", () => {
       />,
     );
 
+    expect(screen.queryByTestId("deep-analysis-tab")).not.toBeInTheDocument();
+
     const analysisTab = screen.getByRole("tab", { name: "Memory Analysis" });
     analysisTab.focus();
     fireEvent.keyDown(analysisTab, { key: "Enter" });
 
     expect(screen.getByTestId("deep-analysis-tab")).toHaveTextContent("space-1:true");
+
+    const pulseTab = screen.getByRole("tab", { name: "Memory Pulse" });
+    pulseTab.focus();
+    fireEvent.keyDown(pulseTab, { key: "Enter" });
+
+    expect(screen.getByTestId("deep-analysis-tab")).toHaveTextContent("space-1:false");
   });
 });

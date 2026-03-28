@@ -255,7 +255,7 @@ export function SpacePageLayout({
 
             <MemoryOverviewTabs
               spaceId={spaceId}
-              stats={dataModel.rangeStats}
+              stats={dataModel.stats}
               pulseMemories={dataModel.pulseMemories}
               insightMemories={dataModel.analysis.sourceMemories}
               cards={dataModel.analysis.cards}

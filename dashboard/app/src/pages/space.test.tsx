@@ -12,9 +12,11 @@ import { shouldCompactMemoryOverview } from "./space";
 const mocks = vi.hoisted(() => ({
   clearSpace: vi.fn(),
   retry: vi.fn(),
+  useStats: vi.fn(),
   useSourceMemories: vi.fn(),
   useSessionPreviewMessages: vi.fn(),
   useMemories: vi.fn(),
+  useDeepAnalysisReports: vi.fn(),
 }));
 
 const FIXED_NOW = new Date("2026-03-21T12:00:00Z");
@@ -302,11 +304,14 @@ vi.mock("@/components/space/use-memory-farm-entry-state", () => ({
 vi.mock("@/api/queries", () => ({
   getSessionPreviewLookupKey: (memory: Memory) =>
     memory.memory_type === "insight" ? memory.session_id : "",
-  useStats: () => ({
-    data: { total: 4, pinned: 0, insight: 4 },
-    isLoading: false,
-    isFetching: false,
-  }),
+  useStats: (spaceId: string, range?: string, enabled = true) => {
+    mocks.useStats(spaceId, range, enabled);
+    return {
+      data: enabled ? { total: 4, pinned: 0, insight: 4 } : undefined,
+      isLoading: false,
+      isFetching: false,
+    };
+  },
   useMemories: (_spaceId: string, params: Record<string, unknown>) => {
     mocks.useMemories(_spaceId, params);
     return {
@@ -389,6 +394,7 @@ vi.mock("@/api/source-memories", () => ({
       data: [activityNewest, preferenceMemory, activityOlder, archivedMemory],
       isLoading: false,
       isFetching: false,
+      refetch: vi.fn(async () => undefined),
     };
   },
 }));
@@ -457,13 +463,32 @@ vi.mock("@/api/analysis-queries", () => ({
   }),
 }));
 
+vi.mock("@/api/deep-analysis-queries", () => ({
+  useDeepAnalysisReports: (...args: unknown[]) => {
+    mocks.useDeepAnalysisReports(...args);
+    return {
+      reports: [],
+      selectedReport: null,
+      selectedReportId: null,
+      setSelectedReportId: vi.fn(),
+      inlineError: null,
+      clearInlineError: vi.fn(),
+      isLoading: false,
+      isCreating: false,
+      createReport: vi.fn(async () => undefined),
+    };
+  },
+}));
+
 describe("SpacePage", () => {
   beforeEach(async () => {
     vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW.getTime());
     window.innerWidth = 1440;
     window.dispatchEvent(new Event("resize"));
+    mocks.useStats.mockClear();
     mocks.useSourceMemories.mockClear();
     mocks.useMemories.mockClear();
+    mocks.useDeepAnalysisReports.mockClear();
     await i18n.changeLanguage("en");
     window.history.pushState({}, "", "/your-memory/space");
     await act(async () => {
@@ -501,6 +526,40 @@ describe("SpacePage", () => {
     expect(
       screen.queryByRole("button", { name: "Delete this memory" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not prefetch deep-analysis reports before the analysis tab is opened", async () => {
+    renderSpacePage();
+
+    expect(mocks.useDeepAnalysisReports).not.toHaveBeenCalled();
+
+    const analysisTab = screen.getByRole("tab", { name: "Memory Analysis" });
+    analysisTab.focus();
+    fireEvent.keyDown(analysisTab, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(mocks.useDeepAnalysisReports).toHaveBeenCalledWith("space-1", true);
+    });
+  });
+
+  it("keeps all-range stats disabled until the export dialog is opened", async () => {
+    renderSpacePage();
+
+    await act(async () => {
+      await router.navigate({
+        to: "/space",
+        search: { range: "30d" },
+      });
+    });
+
+    expect(mocks.useStats).toHaveBeenCalledWith("space-1", "30d", true);
+    expect(mocks.useStats).toHaveBeenCalledWith("space-1", undefined, false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => {
+      expect(mocks.useStats).toHaveBeenCalledWith("space-1", undefined, true);
+    });
   });
 
   it("keeps the detail panel closed after the user closes it in analysis mode", async () => {

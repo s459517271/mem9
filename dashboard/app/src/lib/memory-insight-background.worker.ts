@@ -21,12 +21,20 @@ import type {
 } from "@/types/analysis";
 import type { Memory } from "@/types/memory";
 
+interface InsightWorkerMemory {
+  id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  tags: string[];
+}
+
 type WorkerRequest =
   | {
       id: number;
       type: "derived-signals";
       payload: {
-        memories: Memory[];
+        memories: InsightWorkerMemory[];
         matches: MemoryAnalysisMatch[];
       };
     }
@@ -105,14 +113,17 @@ function setBoundedCache<T>(cache: Map<string, T>, key: string, value: T, maxSiz
   return value;
 }
 
-function createMemoryAnalysisKey(memory: Memory): string {
+function createMemoryAnalysisKey(
+  memory: Pick<Memory, "id" | "content" | "created_at" | "updated_at" | "tags"> &
+    Partial<Pick<Memory, "version" | "memory_type" | "source">>,
+): string {
   return stableHash([
     memory.id,
-    String(memory.version),
+    String(memory.version ?? 0),
     memory.created_at,
     memory.updated_at,
-    memory.memory_type,
-    memory.source,
+    memory.memory_type ?? "",
+    memory.source ?? "",
     memory.content,
     memory.tags.join("\u0001"),
   ].join("\u241f"));
@@ -138,7 +149,12 @@ function createCardsKey(cards: AnalysisCategoryCard[]): string {
   );
 }
 
-function createMemorySetKey(memories: Memory[]): string {
+function createMemorySetKey(
+  memories: Array<
+    Pick<Memory, "id" | "content" | "created_at" | "updated_at" | "tags"> &
+      Partial<Pick<Memory, "version" | "memory_type" | "source">>
+  >,
+): string {
   return stableHash(
     memories
       .map((memory) => createMemoryAnalysisKey(memory))
@@ -147,7 +163,7 @@ function createMemorySetKey(memories: Memory[]): string {
   );
 }
 
-function buildSignalKey(memories: Memory[], matches: MemoryAnalysisMatch[]): string {
+function buildSignalKey(memories: InsightWorkerMemory[], matches: MemoryAnalysisMatch[]): string {
   return stableHash(`signals|${createMemorySetKey(memories)}|${createMatchesKey(matches)}`);
 }
 
@@ -181,7 +197,7 @@ function buildRelationKey(
   ].join("\u241f"));
 }
 
-function getMemoryAnalyses(memories: Memory[]): MemoryDerivedAnalysis[] {
+function getMemoryAnalyses(memories: InsightWorkerMemory[]): MemoryDerivedAnalysis[] {
   return memories.map((memory) => {
     const key = createMemoryAnalysisKey(memory);
     const cached = memoryAnalysisCache.get(key);
@@ -199,7 +215,7 @@ function getMemoryAnalyses(memories: Memory[]): MemoryDerivedAnalysis[] {
 }
 
 function getOrBuildDerivedSignals(
-  memories: Memory[],
+  memories: InsightWorkerMemory[],
   matches: MemoryAnalysisMatch[],
 ): LocalDerivedSignalIndex {
   const cacheKey = buildSignalKey(memories, matches);

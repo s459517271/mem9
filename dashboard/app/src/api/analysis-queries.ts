@@ -27,7 +27,6 @@ import {
   readCachedAnalysisMatches,
   writeCachedAnalysisMatches,
 } from "./local-cache";
-import { useSourceMemories } from "./source-memories";
 import { features } from "@/config/features";
 import { filterMemoriesForView } from "@/lib/memory-filters";
 import type {
@@ -335,10 +334,13 @@ async function startAnalysisStartup(
   return startupRun;
 }
 
-export function useSpaceAnalysis(
-  spaceId: string,
-  range: TimeRangePreset,
-): {
+export function useSpaceAnalysis(input: {
+  spaceId: string;
+  range: TimeRangePreset;
+  sourceMemories: Memory[];
+  sourceLoading: boolean;
+  refreshSource: () => Promise<unknown>;
+}): {
   state: SpaceAnalysisState;
   taxonomy: TaxonomyResponse | null;
   taxonomyUnavailable: boolean;
@@ -350,21 +352,27 @@ export function useSpaceAnalysis(
   sourceLoading: boolean;
   retry: () => void;
 } {
+  const {
+    spaceId,
+    range,
+    sourceMemories: allSourceMemories,
+    sourceLoading,
+    refreshSource,
+  } = input;
   const [state, setState] = useState<SpaceAnalysisState>(INITIAL_STATE);
-  const [attempt, setAttempt] = useState(0);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [matches, setMatches] = useState<MemoryAnalysisMatch[]>([]);
   const [cards, setCards] = useState<AnalysisCategoryCard[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
   const runRef = useRef(0);
   const enabled = features.enableAnalysis && !!spaceId;
-  const sourceQuery = useSourceMemories(spaceId, attempt);
 
   const sourceMemories = useMemo(
     () =>
-      filterMemoriesForView(sourceQuery.data ?? [], {
+      filterMemoriesForView(allSourceMemories, {
         range,
       }),
-    [range, sourceQuery.data],
+    [allSourceMemories, range],
   );
 
   const taxonomyQuery = useQuery({
@@ -400,7 +408,7 @@ export function useSpaceAnalysis(
       return;
     }
 
-    if (sourceQuery.data === undefined) return;
+    if (sourceLoading) return;
 
     let cancelled = false;
 
@@ -479,8 +487,9 @@ export function useSpaceAnalysis(
   }, [
     enabled,
     range,
+    retryNonce,
     sourceMemories,
-    sourceQuery.data,
+    sourceLoading,
     spaceId,
     taxonomyQuery.data,
   ]);
@@ -490,7 +499,7 @@ export function useSpaceAnalysis(
       setState(INITIAL_STATE);
       return;
     }
-    if (sourceQuery.data === undefined) return;
+    if (sourceLoading) return;
 
     const currentRun = runRef.current + 1;
     runRef.current = currentRun;
@@ -815,7 +824,8 @@ export function useSpaceAnalysis(
     enabled,
     range,
     sourceMemories,
-    sourceQuery.data,
+    retryNonce,
+    sourceLoading,
     spaceId,
     taxonomyUnavailable,
   ]);
@@ -829,7 +839,7 @@ export function useSpaceAnalysis(
     matchMap,
     sourceMemories,
     sourceCount: state.snapshot?.expectedTotalMemories ?? sourceMemories.length,
-    sourceLoading: sourceQuery.isLoading || sourceQuery.isFetching || matchesLoading,
+    sourceLoading: sourceLoading || matchesLoading,
     retry: () => {
       const fingerprint = state.fingerprint;
       if (fingerprint) {
@@ -838,8 +848,9 @@ export function useSpaceAnalysis(
       void Promise.all([
         clearAnalysisCache(spaceId, range),
         clearCachedAnalysisMatches(spaceId, range),
+        refreshSource(),
       ]).finally(() => {
-        setAttempt((current) => current + 1);
+        setRetryNonce((current) => current + 1);
         setMatches([]);
         setCards([]);
         setState(INITIAL_STATE);

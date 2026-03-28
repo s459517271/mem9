@@ -18,12 +18,20 @@ import type {
 } from "@/types/analysis";
 import type { Memory } from "@/types/memory";
 
+export interface InsightWorkerMemory {
+  id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  tags: string[];
+}
+
 type WorkerRequest =
   | {
       id: number;
       type: "derived-signals";
       payload: {
-        memories: Memory[];
+        memories: InsightWorkerMemory[];
         matches: MemoryAnalysisMatch[];
       };
     }
@@ -96,6 +104,8 @@ export const EMPTY_MEMORY_INSIGHT_RELATION_GRAPH: MemoryInsightRelationGraph = {
   risingEntities: [],
 };
 
+const DEFAULT_DERIVED_SIGNALS_MINIMUM_MEMORY_COUNT = 80;
+
 let backgroundWorker: Worker | null = null;
 let nextRequestID = 1;
 const pendingRequests = new Map<
@@ -110,6 +120,32 @@ function shouldUseBackgroundWorker(): boolean {
   return typeof window !== "undefined" &&
     typeof Worker !== "undefined" &&
     import.meta.env.MODE !== "test";
+}
+
+export function projectInsightWorkerMemory(memory: Memory): InsightWorkerMemory {
+  return {
+    id: memory.id,
+    content: memory.content,
+    created_at: memory.created_at,
+    updated_at: memory.updated_at,
+    tags: memory.tags.slice(),
+  };
+}
+
+export function shouldUseDerivedSignalsWorker(input: {
+  enabled?: boolean;
+  memoryCount: number;
+  minimumMemoryCount?: number;
+  workerAvailable?: boolean;
+}): boolean {
+  const {
+    enabled = true,
+    memoryCount,
+    minimumMemoryCount = DEFAULT_DERIVED_SIGNALS_MINIMUM_MEMORY_COUNT,
+    workerAvailable = shouldUseBackgroundWorker(),
+  } = input;
+
+  return enabled && workerAvailable && memoryCount >= minimumMemoryCount;
 }
 
 function getWorker(): Worker {
@@ -238,19 +274,31 @@ function useBackgroundComputation<T extends WorkerResult>({
 export function useBackgroundDerivedSignals({
   memories,
   matchMap,
+  enabled = true,
+  minimumMemoryCount = DEFAULT_DERIVED_SIGNALS_MINIMUM_MEMORY_COUNT,
 }: {
   memories: Memory[];
   matchMap: Map<string, MemoryAnalysisMatch>;
+  enabled?: boolean;
+  minimumMemoryCount?: number;
 }): { data: LocalDerivedSignalIndex; isComputing: boolean } {
-  const workerEnabled = shouldUseBackgroundWorker();
+  const workerEnabled = shouldUseDerivedSignalsWorker({
+    enabled,
+    memoryCount: memories.length,
+    minimumMemoryCount,
+  });
   const matches = useMemo(() => [...matchMap.values()], [matchMap]);
+  const projectedMemories = useMemo(
+    () => memories.map(projectInsightWorkerMemory),
+    [memories],
+  );
 
   return useBackgroundComputation({
     workerEnabled,
     request: {
       type: "derived-signals",
       payload: {
-        memories,
+        memories: projectedMemories,
         matches,
       },
     },
@@ -260,7 +308,7 @@ export function useBackgroundDerivedSignals({
         matchMap,
       }),
     emptyValue: EMPTY_LOCAL_DERIVED_SIGNAL_INDEX,
-    deps: [workerEnabled, memories, matches, matchMap],
+    deps: [workerEnabled, projectedMemories, memories, matches, matchMap],
   });
 }
 

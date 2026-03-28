@@ -52,7 +52,7 @@ function addEntityHit(
 }
 
 export function extractMemoryInsightEntities(
-  memory: Memory,
+  memory: Pick<Memory, "content">,
 ): MemoryInsightEntityHit[] {
   const hits = new Map<string, MemoryInsightEntityHit>();
   const source = memory.content;

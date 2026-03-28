@@ -62,6 +62,7 @@ export function MemoryOverviewTabs({
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<MemoryInsightTab>("pulse");
+  const [hasVisitedAnalysisTab, setHasVisitedAnalysisTab] = useState(false);
   const [insightResetToken, setInsightResetToken] = useState(0);
 
   return (
@@ -69,6 +70,9 @@ export function MemoryOverviewTabs({
       value={tab}
       onValueChange={(value) => {
         const next = value as MemoryInsightTab;
+        if (next === "analysis") {
+          setHasVisitedAnalysisTab(true);
+        }
         if (tab === "insight" && next !== "insight") {
           setInsightResetToken((current) => current + 1);
         }
@@ -131,13 +135,19 @@ export function MemoryOverviewTabs({
         />
       </TabsContent>
 
-      <TabsContent
-        value="analysis"
-        className="-mt-px mt-0 data-[state=inactive]:hidden"
-        forceMount
-      >
-        <DeepAnalysisTab spaceId={spaceId} active={tab === "analysis"} onEntitySearch={onEntitySearch} />
-      </TabsContent>
+      {hasVisitedAnalysisTab && (
+        <TabsContent
+          value="analysis"
+          className="-mt-px mt-0 data-[state=inactive]:hidden"
+          forceMount
+        >
+          <DeepAnalysisTab
+            spaceId={spaceId}
+            active={tab === "analysis"}
+            onEntitySearch={onEntitySearch}
+          />
+        </TabsContent>
+      )}
     </Tabs>
   );
 }

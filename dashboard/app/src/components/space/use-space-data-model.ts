@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   getSessionPreviewLookupKey,
   useStats,
@@ -25,7 +25,7 @@ import {
 } from "@/lib/memory-derived-signals";
 import { useBackgroundDerivedSignals } from "@/lib/memory-insight-background";
 import { normalizeTagSignal } from "@/lib/tag-signals";
-import { buildStats, buildTagOptions, createTagResolver, selectDisplayedMemories } from "./space-selectors";
+import { buildTagOptions, createTagResolver, selectDisplayedMemories } from "./space-selectors";
 import { useMemoryFarmEntryState, type MemoryFarmEntryStatus } from "./use-memory-farm-entry-state";
 import { features } from "@/config/features";
 import type { AnalysisCategory } from "@/types/analysis";
@@ -42,7 +42,6 @@ import type { TagSummary } from "./tag-strip";
 export interface SpaceDataModel {
   stats: MemoryStats | undefined;
   totalStats: MemoryStats | undefined;
-  rangeStats: MemoryStats;
   pulseMemories: Memory[];
   analysis: ReturnType<typeof useSpaceAnalysis>;
   sourceQuery: ReturnType<typeof useSourceMemories>;
@@ -87,13 +86,20 @@ export function useSpaceDataModel(input: {
   memoryTypeFilter: MemoryTypeFilter;
   timelineSelection: TimelineSelection | undefined;
   importStatusOpen: boolean;
+  exportOpen: boolean;
+  isDesktopViewport: boolean;
+  mobileAnalysisOpen: boolean;
   selected: Memory | null;
   localVisibleCount: number;
   onSelectedMissing: () => void;
 }): SpaceDataModel {
   const { spaceId } = input;
   const { data: stats } = useStats(spaceId, input.range);
-  const { data: totalStats } = useStats(spaceId);
+  const { data: totalStatsQuery } = useStats(
+    spaceId,
+    undefined,
+    input.exportOpen && input.range !== "all",
+  );
   const {
     data: memData,
     fetchNextPage,
@@ -108,12 +114,23 @@ export function useSpaceDataModel(input: {
     facet: input.facet,
   });
   const sourceQuery = useSourceMemories(spaceId);
+  const refreshSource = useCallback(
+    () => sourceQuery.refetch(),
+    [sourceQuery],
+  );
   const createMutation = useCreateMemory(spaceId);
   const deleteMutation = useDeleteMemory(spaceId);
   const updateMutation = useUpdateMemory(spaceId);
   const exportMutation = useExportMemories(spaceId);
   const importMutation = useImportMemories(spaceId);
-  const analysis = useSpaceAnalysis(spaceId, input.range);
+  const allMemories = sourceQuery.data ?? [];
+  const analysis = useSpaceAnalysis({
+    spaceId,
+    range: input.range,
+    sourceMemories: allMemories,
+    sourceLoading: sourceQuery.isLoading || sourceQuery.isFetching,
+    refreshSource,
+  });
   const farmEntryStatus = useMemoryFarmEntryState(
     spaceId,
     sourceQuery.isLoading || sourceQuery.isFetching,
@@ -129,14 +146,9 @@ export function useSpaceDataModel(input: {
 
   const memories = memData?.pages.flatMap((page) => page.memories) ?? [];
   const firstPageSize = memData?.pages[0]?.memories.length ?? 0;
-  const allMemories = sourceQuery.data ?? [];
   const rangeScopedMemories = useMemo(
     () => filterMemoriesForView(allMemories, { range: input.range }),
     [allMemories, input.range],
-  );
-  const rangeStats = useMemo(
-    () => buildStats(rangeScopedMemories),
-    [rangeScopedMemories],
   );
   const timelineScopedMemories = useMemo(
     () => filterMemoriesForView(rangeScopedMemories, { timeline: input.timelineSelection }),
@@ -158,9 +170,12 @@ export function useSpaceDataModel(input: {
     () => createTagResolver(listSignalIndex),
     [listSignalIndex],
   );
+  const analysisSignalsEnabled = features.enableAnalysis &&
+    (input.isDesktopViewport || input.mobileAnalysisOpen);
   const { data: analysisRangeSignalIndex } = useBackgroundDerivedSignals({
     memories: rangeScopedMemories,
     matchMap: analysis.matchMap,
+    enabled: analysisSignalsEnabled,
   });
   const analysisTagStats = useMemo(
     () => analysisRangeSignalIndex.tagStats.map((stat) => ({
@@ -197,6 +212,7 @@ export function useSpaceDataModel(input: {
   const { data: analysisCategorySignalIndex } = useBackgroundDerivedSignals({
     memories: analysisCategoryScopeMemories,
     matchMap: analysis.matchMap,
+    enabled: !!input.analysisCategory,
   });
   const analysisCategoryTagResolver = useMemo<MemoryTagResolver>(
     () => createTagResolver(analysisCategorySignalIndex),
@@ -362,10 +378,11 @@ export function useSpaceDataModel(input: {
     isMemoryLoading,
   ]);
 
+  const totalStats = input.range === "all" ? stats : totalStatsQuery;
+
   return {
     stats,
     totalStats,
-    rangeStats,
     pulseMemories: rangeScopedMemories,
     analysis,
     sourceQuery,

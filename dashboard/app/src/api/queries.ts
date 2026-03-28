@@ -42,12 +42,16 @@ function getSessionPreviewRequestIDs(memories: Memory[]): string[] {
   return [...requestIDs].sort((left, right) => left.localeCompare(right, "en"));
 }
 
-export function useStats(spaceId: string, range?: TimeRangePreset) {
+export function useStats(
+  spaceId: string,
+  range?: TimeRangePreset,
+  enabled = true,
+) {
   const timeParams = range ? presetToParams(range) : undefined;
   return useQuery({
     queryKey: ["space", spaceId, "stats", range ?? "all"],
     queryFn: () => api.getStats(spaceId, timeParams),
-    enabled: !!spaceId,
+    enabled: !!spaceId && enabled,
     placeholderData: keepPreviousData,
   });
 }

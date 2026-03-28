@@ -33,7 +33,7 @@ export function useDeepAnalysisReports(spaceId: string, active: boolean) {
   const listQuery = useQuery({
     queryKey: getDeepAnalysisReportsQueryKey(spaceId),
     queryFn: () => analysisApi.listDeepAnalysisReports(spaceId, 20, 0),
-    enabled: !!spaceId,
+    enabled: !!spaceId && active,
     refetchInterval: (query) => {
       if (!active) return false;
       const data = query.state.data;
@@ -57,7 +57,7 @@ export function useDeepAnalysisReports(spaceId: string, active: boolean) {
   const detailQuery = useQuery({
     queryKey: getDeepAnalysisReportDetailQueryKey(spaceId, selectedReportId),
     queryFn: () => analysisApi.getDeepAnalysisReport(spaceId, selectedReportId!),
-    enabled: !!spaceId && !!selectedReportId,
+    enabled: !!spaceId && !!selectedReportId && active,
     refetchInterval: (query) => {
       if (!active) return false;
       const data = query.state.data;
