@@ -154,7 +154,6 @@ describe("DeepAnalysisTab", () => {
   });
 
   it("renders the richer persona fields, downloads cleanup csv, and deletes duplicate memories", async () => {
-    vi.stubGlobal("confirm", vi.fn(() => true));
     const createObjectUrl = vi.fn(() => "blob:report");
     const revokeObjectUrl = vi.fn();
     const click = vi.fn();
@@ -319,6 +318,8 @@ describe("DeepAnalysisTab", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Delete dupes" }));
+    expect(screen.getByText("Delete the duplicate memories found in this report? This starts a background cleanup and the deleted memories cannot be restored.")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
       expect(mocks.deleteDeepAnalysisDuplicates).toHaveBeenCalledWith("space-1", "dar_completed");

@@ -817,6 +817,7 @@ export function DeepAnalysisTab({
   const [downloadingReportId, setDownloadingReportId] = useState<string | null>(null);
   const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
   const [deletingWholeReportId, setDeletingWholeReportId] = useState<string | null>(null);
+  const [deleteDuplicatesTarget, setDeleteDuplicatesTarget] = useState<string | null>(null);
   const [deleteReportTarget, setDeleteReportTarget] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -909,12 +910,17 @@ export function DeepAnalysisTab({
       return;
     }
 
+    setDeleteDuplicatesTarget(selectedReport.id);
+  };
+
+  const confirmDeleteDuplicates = async (reportId: string) => {
     setDeleteError(null);
     setDeleteFeedback(null);
     setDownloadError(null);
-    setDeletingReportId(selectedReport.id);
+    setDeleteDuplicatesTarget(null);
+    setDeletingReportId(reportId);
     try {
-      const result = await analysisApi.deleteDeepAnalysisDuplicates(spaceId, selectedReport.id);
+      const result = await analysisApi.deleteDeepAnalysisDuplicates(spaceId, reportId);
       setDeleteFeedback(
         result.duplicateCleanup.status === "COMPLETED"
           ? t("deep_analysis.quality.delete_success", {
@@ -926,7 +932,7 @@ export function DeepAnalysisTab({
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["space", spaceId, "deepAnalysis", "reports"] }),
-        queryClient.invalidateQueries({ queryKey: ["space", spaceId, "deepAnalysis", "report", selectedReport.id] }),
+        queryClient.invalidateQueries({ queryKey: ["space", spaceId, "deepAnalysis", "report", reportId] }),
       ]);
     } catch (error) {
       setDeleteError(
@@ -935,7 +941,7 @@ export function DeepAnalysisTab({
           : t("deep_analysis.quality.delete_failed"),
       );
     } finally {
-      setDeletingReportId(null);
+      setDeletingReportId((current) => (current === reportId ? null : current));
     }
   };
 
@@ -1154,6 +1160,37 @@ export function DeepAnalysisTab({
               onClick={() => {
                 if (deleteReportTarget) {
                   void confirmDeleteReport(deleteReportTarget);
+                }
+              }}
+            >
+              {t("delete.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteDuplicatesTarget !== null} onOpenChange={(open) => { if (!open) setDeleteDuplicatesTarget(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("deep_analysis.quality.delete_duplicates")}</DialogTitle>
+            <DialogDescription>
+              {t("deep_analysis.quality.delete_confirm")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteDuplicatesTarget(null)}
+            >
+              {t("delete.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (deleteDuplicatesTarget) {
+                  void confirmDeleteDuplicates(deleteDuplicatesTarget);
                 }
               }}
             >

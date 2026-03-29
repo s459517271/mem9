@@ -344,6 +344,7 @@
       "download_short": "Export CSV",
       "delete_duplicates": "Delete duplicate memories",
       "delete_short": "Delete dupes",
+      "delete_confirm": "Delete the duplicate memories found in this report? This starts a background cleanup and the deleted memories cannot be restored.",
       "delete_started": "Started deleting {{count}} duplicate memories in the background.",
       "delete_running": "Deleting {{count}} duplicate memories in the background…",
       "delete_success": "Deleted {{count}} duplicate memories.",

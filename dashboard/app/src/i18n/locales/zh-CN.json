@@ -344,6 +344,7 @@
       "download_short": "导出 CSV",
       "delete_duplicates": "删除重复记忆",
       "delete_short": "删除重复",
+      "delete_confirm": "确认删除这份报告识别出的重复记忆吗？删除会在后台执行，且这些被删除的记忆无法恢复。",
       "delete_started": "已开始在后台删除 {{count}} 条重复记忆。",
       "delete_running": "正在后台删除 {{count}} 条重复记忆…",
       "delete_success": "已删除 {{count}} 条重复记忆。",
