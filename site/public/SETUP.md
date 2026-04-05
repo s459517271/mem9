@@ -19,6 +19,7 @@ When this file is read, send ONLY the choice prompt below. Do not include enviro
 - Only edit the exact `openclaw.json` keys listed in `SKILL.md`.
 - Do not upload local history from this setup flow.
 - Do not use direct web-request commands, raw memory API calls, or scripted shell patch commands in this public setup flow.
+- Do not change the user's global npm registry config during setup unless the user explicitly asks for a permanent mirror change.
 - Reconnect and create-new are separate branches. Once one branch is selected, ignore the other branch unless the user explicitly changes their choice.
 - Before taking any action, show one dry-run preview that covers install, config edits, expected restarts, and what the user must do after the restart.
 - Use one explicit approval for the entire disclosed flow. Do not ask for a second approval unless the scope materially changes.
@@ -31,6 +32,13 @@ When this file is read, send ONLY the choice prompt below. Do not include enviro
 - Local variable name when needed: `MEM9_API_KEY`
 - Reconnect source of truth: `USER_PROVIDED_MEM9_API_KEY`
 - Create-new source of truth: `AUTO_PROVISIONED_MEM9_API_KEY`
+
+## Attribution Rule
+
+- If this setup flow was reached from a remotely loaded `SKILL.md` URL that contains query params whose keys start with `utm_`, and the user chooses create-new, copy those same filtered `utm_*` pairs into `plugins.entries.mem9.config.provisionQueryParams` before the first restart.
+- Copy only `utm_*` keys. Do not copy non-UTM query params.
+- Do not add or modify `provisionQueryParams` in reconnect mode.
+- If no `utm_*` params are present on the current remote `SKILL.md` URL, leave `provisionQueryParams` absent.
 
 ## Step 0 — Choose Create Or Reconnect
 
@@ -75,17 +83,34 @@ Do not rely on the post-approval notice as the only place where restart and retu
 The dry-run preview must disclose:
 
 - package name: `@mem9/mem9`
+- install may use a one-shot `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com` override when the default npm registry is slow or unreachable
 - only mem9 plugin config keys will be changed
 - reconnect path expects one restart after config is written and read back
 - create-new path expects one restart without `apiKey`; after the generated key is captured and written back to config, no second restart is needed
 - local history will not be uploaded by this setup flow
 - one short restart-and-return instruction in the user's language
 
-Install command:
+Before installing, detect npm registry reachability first. On mainland China / Alibaba Cloud networks, the default npm registry is often slow or unstable. Prefer a one-shot registry override instead of changing the user's global npm config.
+
+Install command sequence:
 
 ```bash
-openclaw plugins install @mem9/mem9
+NPMJS_TIME="$(curl -o /dev/null -sS --connect-timeout 2 --max-time 6 -w '%{time_total}' https://registry.npmjs.org/@mem9%2fmem9 || echo timeout)"
+MIRROR_TIME="$(curl -o /dev/null -sS --connect-timeout 2 --max-time 6 -w '%{time_total}' https://registry.npmmirror.com/@mem9%2fmem9 || echo timeout)"
+
+if [ "$MIRROR_TIME" != "timeout" ] && { [ "$NPMJS_TIME" = "timeout" ] || awk "BEGIN { exit !($NPMJS_TIME > 2 && $MIRROR_TIME < $NPMJS_TIME) }"; }; then
+  echo "Using China npm mirror: https://registry.npmmirror.com"
+  NPM_CONFIG_REGISTRY=https://registry.npmmirror.com openclaw plugins install @mem9/mem9
+else
+  openclaw plugins install @mem9/mem9
+fi
 ```
+
+Decision rule:
+
+- If the official npm registry times out, but `npmmirror` is reachable, treat that as a China-optimized network path and use `https://registry.npmmirror.com`.
+- If both registries are reachable, but the official registry is materially slower, prefer `npmmirror`.
+- Do not run `npm config set registry ...` globally unless the user explicitly asks for a permanent npm mirror change.
 
 Preflight failure rule:
 
@@ -94,6 +119,22 @@ Preflight failure rule:
 - In that case, stop before config edits or restart and use `TROUBLESHOOTING.md` from the same directory.
 - Do not improvise a new install branch after the dry-run.
 - A second approval is only acceptable if the original disclosed scope did not already cover local mem9 cleanup.
+
+### Required Post-Install Notice
+
+Immediately after install completes, and before any restart action or restart tool call, send a clear user-visible notice.
+
+Recommended notice content:
+
+```text
+✅ mem9 plugin installed. Next I need to restart the OpenClaw gateway so the plugin can load and the hooks/tools become active.
+
+The restart will take about 1 minute. After that, send me a message to confirm mem9 is functional.
+```
+
+- If the gateway will be restarted automatically through tools or exec, send this notice before issuing the restart action.
+- Do not rely on the final assistant reply as the first place this notice appears.
+- After the restart finishes, ask the user to wait about 1 minute and send a short message such as `hi`.
 
 ### Required Post-Approval Notice
 
@@ -142,6 +183,7 @@ Before writing `openclaw.json`:
 - Show the exact keys that will change
 - Preserve unrelated config keys
 - Use the approval already obtained in Step 0 unless the scope changed
+- If create-new started from a remote `SKILL.md` URL with `utm_*` params, include `plugins.entries.mem9.config.provisionQueryParams` in the disclosed key list
 
 ### Reconnect Existing API Key
 
@@ -191,6 +233,7 @@ Effective changes for OpenClaw `>= 2.2.0`:
 - `plugins.entries.mem9.enabled = true`
 - `plugins.entries.mem9.config.apiUrl = "https://api.mem9.ai"` unless the user chose another `apiUrl`
 - Leave `plugins.entries.mem9.config.apiKey` absent for the first restart
+- If the current remote `SKILL.md` URL has `utm_*`, set `plugins.entries.mem9.config.provisionQueryParams` to the same filtered `utm_*` map for the first restart
 - `plugins.allow` includes `"mem9"`
 
 Create-new hard rules:
@@ -213,6 +256,26 @@ Minimal shape if creating a fresh file:
       }
     },
     "allow": ["mem9"]
+  }
+}
+```
+
+If remote-skill `utm_*` params are present, add them under `config.provisionQueryParams` before the first restart, for example:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "mem9": {
+        "config": {
+          "apiUrl": "https://api.mem9.ai",
+          "provisionQueryParams": {
+            "utm_source": "bosn",
+            "utm_campaign": "spring"
+          }
+        }
+      }
+    }
   }
 }
 ```
