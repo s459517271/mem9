@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/qiffang/mnemos/server/internal/runtimeusage"
 )
 
 type Config struct {
@@ -15,6 +17,7 @@ type Config struct {
 	DSN       string
 	RateLimit float64
 	RateBurst int
+	Env       string
 
 	// DBBackend selects the database driver: "tidb" (default), "postgres", or "db9".
 	DBBackend string
@@ -37,6 +40,14 @@ type Config struct {
 	LLMTemperature float64
 	IngestMode     string
 
+	// FactExtractionIncludeAssistant allows smart ingest to extract durable facts
+	// from assistant turns in addition to user turns. Disabled by default.
+	FactExtractionIncludeAssistant bool
+
+	// DisableSessionSave skips raw session row persistence for message ingest.
+	// Smart ingest still extracts and reconciles facts into insight memories.
+	DisableSessionSave bool
+
 	TiDBZeroEnabled          bool
 	TiDBZeroAPIURL           string
 	TenantPoolMaxIdle        int
@@ -44,10 +55,15 @@ type Config struct {
 	TenantPoolConnectTimeout time.Duration
 	TenantPoolIdleTimeout    time.Duration
 	TenantPoolTotalLimit     int
+	ChainRecallStopScore     float64
+	RecallRequestTimeout     time.Duration
+	RecallResponseReserve    time.Duration
 
 	// TiDB Cloud Pool configuration
-	TiDBCloudAPIURL string
-	TiDBCloudPoolID string
+	TiDBCloudAPIURL                  string
+	TiDBCloudPoolID                  string
+	TiDBCloudPreferPrivateLink       bool
+	TiDBCloudPrivateLinkServiceNames map[string]struct{}
 
 	// FTSEnabled controls whether full-text search is attempted.
 	// Set MNEMO_FTS_ENABLED=true only when the TiDB cluster supports
@@ -63,6 +79,25 @@ type Config struct {
 	MeteringEnabled       bool
 	MeteringURL           string
 	MeteringFlushInterval time.Duration
+
+	// RuntimeUsage enables commercial SaaS quota gating plus runtime usage
+	// service metering. Runtime usage metering uses RuntimeUsageBaseURL, not MeteringURL.
+	RuntimeUsageEnabled            bool
+	RuntimeUsageProviderID         string
+	RuntimeUsageBaseURL            string
+	RuntimeUsageInternalSecret     string `json:"-"`
+	RuntimeUsageTimeout            time.Duration
+	RuntimeUsageMeteringTimeout    time.Duration
+	RuntimeUsageReservationTTL     time.Duration
+	RuntimeUsageOperationTTL       time.Duration
+	RuntimeUsageRetryBaseDelay     time.Duration
+	RuntimeUsageRetryMaxDelay      time.Duration
+	RuntimeUsageFailOpen           bool
+	RuntimeUsageOutboxEnabled      bool
+	RuntimeUsageNoticeTimeout      time.Duration
+	RuntimeUsageNoticeCacheEnabled bool
+	RuntimeUsageNoticeCacheTTL     time.Duration
+	RuntimeUsageNoticeStaleTTL     time.Duration
 
 	// DebugLLM enables logging of raw LLM response content, which may contain
 	// user data. Disabled by default. Enable only in dev/test environments via
@@ -97,7 +132,15 @@ type Config struct {
 	// MNEMO_CLUSTER_BLACKLIST (comma-separated). Empty by default.
 	ClusterBlacklist map[string]struct{}
 
+	// AutoSpendLimit controls automatic spend-limit increases for eligible clusters.
+	AutoSpendLimitEnabled   bool
+	AutoSpendLimitIncrement int
+	AutoSpendLimitMax       int
+	AutoSpendLimitCooldown  time.Duration
+
 	UTMEnabled bool
+
+	CORSAllowedOrigins []string
 }
 
 func Load() (*Config, error) {
@@ -115,44 +158,114 @@ func Load() (*Config, error) {
 			return nil, err
 		}
 	}
+	runtimeUsageEnabled := envBool("MNEMO_RUNTIME_USAGE_ENABLED", false)
+	runtimeUsageFailOpen := envBool("MNEMO_RUNTIME_USAGE_FAIL_OPEN", false)
+	runtimeUsageOutboxEnabled, runtimeUsageOutboxSet := envBoolWithSet("MNEMO_RUNTIME_USAGE_OUTBOX_ENABLED", runtimeUsageEnabled)
+	runtimeUsageProviderID := ""
+	runtimeUsageBaseURL := ""
+	if runtimeUsageEnabled {
+		var err error
+		runtimeUsageBaseURL, err = parseRuntimeUsageBaseURL(os.Getenv("MNEMO_RUNTIME_USAGE_BASE_URL"))
+		if err != nil {
+			return nil, err
+		}
+		runtimeUsageProviderID = strings.TrimSpace(os.Getenv("MNEMO_RUNTIME_USAGE_PROVIDER_ID"))
+		if strings.TrimSpace(os.Getenv("MNEMO_RUNTIME_USAGE_INTERNAL_SECRET")) == "" {
+			return nil, fmt.Errorf("MNEMO_RUNTIME_USAGE_INTERNAL_SECRET is required when MNEMO_RUNTIME_USAGE_ENABLED=true")
+		}
+		if runtimeUsageOutboxSet && !runtimeUsageOutboxEnabled && !runtimeUsageFailOpen {
+			return nil, fmt.Errorf("MNEMO_RUNTIME_USAGE_OUTBOX_ENABLED=false requires MNEMO_RUNTIME_USAGE_FAIL_OPEN=true when runtime usage is enabled")
+		}
+	}
+	runtimeUsageRetryBaseDelay := runtimeusage.DefaultReservationRetryBaseDelay
+	runtimeUsageRetryMaxDelay := runtimeusage.DefaultReservationRetryMaxDelay
+	if runtimeUsageEnabled {
+		var err error
+		runtimeUsageRetryBaseDelay, err = envDurationStrict("MNEMO_RUNTIME_USAGE_RESERVATION_RETRY_BASE_DELAY", runtimeUsageRetryBaseDelay)
+		if err != nil {
+			return nil, err
+		}
+		runtimeUsageRetryMaxDelay, err = envDurationStrict("MNEMO_RUNTIME_USAGE_RESERVATION_RETRY_MAX_DELAY", runtimeUsageRetryMaxDelay)
+		if err != nil {
+			return nil, err
+		}
+	}
+	recallRequestTimeout, err := envDurationStrict("MNEMO_RECALL_REQUEST_TIMEOUT", time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	recallResponseReserve, err := envDurationStrict("MNEMO_RECALL_RESPONSE_RESERVE", 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
 
+	env := strings.ToLower(strings.TrimSpace(envOr("MNEMO_ENV", envOr("APP_ENV", "development"))))
 	cfg := &Config{
-		Port:                     envOr("MNEMO_PORT", "8080"),
-		DSN:                      dsn,
-		DBBackend:                envOr("MNEMO_DB_BACKEND", "tidb"),
-		RateLimit:                envFloat("MNEMO_RATE_LIMIT", 100),
-		RateBurst:                envInt("MNEMO_RATE_BURST", 200),
-		EmbedAutoModel:           os.Getenv("MNEMO_EMBED_AUTO_MODEL"),
-		EmbedAutoDims:            envInt("MNEMO_EMBED_AUTO_DIMS", 1024),
-		EmbedAPIKey:              os.Getenv("MNEMO_EMBED_API_KEY"),
-		EmbedBaseURL:             os.Getenv("MNEMO_EMBED_BASE_URL"),
-		EmbedModel:               os.Getenv("MNEMO_EMBED_MODEL"),
-		EmbedDims:                envInt("MNEMO_EMBED_DIMS", 1536),
-		LLMAPIKey:                os.Getenv("MNEMO_LLM_API_KEY"),
-		LLMBaseURL:               os.Getenv("MNEMO_LLM_BASE_URL"),
-		LLMModel:                 envOr("MNEMO_LLM_MODEL", "gpt-4o-mini"),
-		LLMTemperature:           envFloat("MNEMO_LLM_TEMPERATURE", 0.1),
-		IngestMode:               envOr("MNEMO_INGEST_MODE", "smart"),
-		TiDBZeroEnabled:          envBool("MNEMO_TIDB_ZERO_ENABLED", true),
-		TiDBZeroAPIURL:           envOr("MNEMO_TIDB_ZERO_API_URL", "https://zero.tidbapi.com/v1alpha1"),
-		TiDBCloudAPIURL:          envOr("MNEMO_TIDBCLOUD_API_URL", "https://serverless.tidbapi.com"),
-		TiDBCloudPoolID:          envOr("MNEMO_TIDBCLOUD_POOL_ID", "2"),
-		TenantPoolMaxIdle:        envInt("MNEMO_TENANT_POOL_MAX_IDLE", 5),
-		TenantPoolMaxOpen:        envInt("MNEMO_TENANT_POOL_MAX_OPEN", 10),
-		TenantPoolConnectTimeout: envDuration("MNEMO_TENANT_POOL_CONNECT_TIMEOUT", 3*time.Second),
-		TenantPoolIdleTimeout:    envDuration("MNEMO_TENANT_POOL_IDLE_TIMEOUT", 10*time.Minute),
-		TenantPoolTotalLimit:     envInt("MNEMO_TENANT_POOL_TOTAL_LIMIT", 200),
-		UploadDir:                envOr("MNEMO_UPLOAD_DIR", "./uploads"),
-		FTSEnabled:               envBool("MNEMO_FTS_ENABLED", false),
-		WorkerConcurrency:        envInt("MNEMO_WORKER_CONCURRENCY", 5),
-		MeteringEnabled:          meteringEnabled,
-		MeteringURL:              meteringURL,
-		MeteringFlushInterval:    envDuration("MNEMO_METERING_FLUSH_INTERVAL", 10*time.Second),
-		EncryptType:              envOr("MNEMO_ENCRYPT_TYPE", "plain"),
-		EncryptKey:               os.Getenv("MNEMO_ENCRYPT_KEY"),
-		DebugLLM:                 envBool("MNEMO_DEBUG_LLM", false),
-		ClusterBlacklist:         parseClusterBlacklist(os.Getenv("MNEMO_CLUSTER_BLACKLIST")),
-		UTMEnabled:               envBool("MNEMO_UTM_ENABLED", false),
+		Port:                             envOr("MNEMO_PORT", "8080"),
+		DSN:                              dsn,
+		Env:                              env,
+		DBBackend:                        envOr("MNEMO_DB_BACKEND", "tidb"),
+		RateLimit:                        envFloat("MNEMO_RATE_LIMIT", 100),
+		RateBurst:                        envInt("MNEMO_RATE_BURST", 200),
+		EmbedAutoModel:                   os.Getenv("MNEMO_EMBED_AUTO_MODEL"),
+		EmbedAutoDims:                    envInt("MNEMO_EMBED_AUTO_DIMS", 1024),
+		EmbedAPIKey:                      os.Getenv("MNEMO_EMBED_API_KEY"),
+		EmbedBaseURL:                     os.Getenv("MNEMO_EMBED_BASE_URL"),
+		EmbedModel:                       os.Getenv("MNEMO_EMBED_MODEL"),
+		EmbedDims:                        envInt("MNEMO_EMBED_DIMS", 1536),
+		LLMAPIKey:                        os.Getenv("MNEMO_LLM_API_KEY"),
+		LLMBaseURL:                       os.Getenv("MNEMO_LLM_BASE_URL"),
+		LLMModel:                         envOr("MNEMO_LLM_MODEL", "gpt-4o-mini"),
+		LLMTemperature:                   envFloat("MNEMO_LLM_TEMPERATURE", 0.1),
+		IngestMode:                       envOr("MNEMO_INGEST_MODE", "smart"),
+		FactExtractionIncludeAssistant:   envBool("MNEMO_FACT_EXTRACTION_INCLUDE_ASSISTANT", false),
+		DisableSessionSave:               envBool("MNEMO_DISABLE_SESSION_SAVE", false),
+		TiDBZeroEnabled:                  envBool("MNEMO_TIDB_ZERO_ENABLED", true),
+		TiDBZeroAPIURL:                   envOr("MNEMO_TIDB_ZERO_API_URL", "https://zero.tidbapi.com/v1alpha1"),
+		TiDBCloudAPIURL:                  envOr("MNEMO_TIDBCLOUD_API_URL", "https://serverless.tidbapi.com"),
+		TiDBCloudPoolID:                  envOr("MNEMO_TIDBCLOUD_POOL_ID", "2"),
+		TiDBCloudPreferPrivateLink:       envBool("MNEMO_TIDBCLOUD_PREFER_PRIVATELINK", false),
+		TiDBCloudPrivateLinkServiceNames: parseCSVSet(os.Getenv("MNEMO_TIDBCLOUD_PRIVATELINK_SERVICE_NAMES")),
+		TenantPoolMaxIdle:                envInt("MNEMO_TENANT_POOL_MAX_IDLE", 5),
+		TenantPoolMaxOpen:                envInt("MNEMO_TENANT_POOL_MAX_OPEN", 10),
+		TenantPoolConnectTimeout:         envDuration("MNEMO_TENANT_POOL_CONNECT_TIMEOUT", 3*time.Second),
+		TenantPoolIdleTimeout:            envDuration("MNEMO_TENANT_POOL_IDLE_TIMEOUT", 10*time.Minute),
+		TenantPoolTotalLimit:             envInt("MNEMO_TENANT_POOL_TOTAL_LIMIT", 200),
+		ChainRecallStopScore:             envFloat("MNEMO_CHAIN_RECALL_STOP_SCORE", 0.8),
+		RecallRequestTimeout:             recallRequestTimeout,
+		RecallResponseReserve:            recallResponseReserve,
+		UploadDir:                        envOr("MNEMO_UPLOAD_DIR", "./uploads"),
+		FTSEnabled:                       envBool("MNEMO_FTS_ENABLED", false),
+		WorkerConcurrency:                envInt("MNEMO_WORKER_CONCURRENCY", 5),
+		MeteringEnabled:                  meteringEnabled,
+		MeteringURL:                      meteringURL,
+		MeteringFlushInterval:            envDuration("MNEMO_METERING_FLUSH_INTERVAL", 10*time.Second),
+		RuntimeUsageEnabled:              runtimeUsageEnabled,
+		RuntimeUsageProviderID:           runtimeUsageProviderID,
+		RuntimeUsageBaseURL:              runtimeUsageBaseURL,
+		RuntimeUsageInternalSecret:       strings.TrimSpace(os.Getenv("MNEMO_RUNTIME_USAGE_INTERNAL_SECRET")),
+		RuntimeUsageTimeout:              envDuration("MNEMO_RUNTIME_USAGE_TIMEOUT", 3*time.Second),
+		RuntimeUsageMeteringTimeout:      envDuration("MNEMO_RUNTIME_USAGE_METERING_TIMEOUT", 5*time.Second),
+		RuntimeUsageReservationTTL:       envDuration("MNEMO_RUNTIME_USAGE_RESERVATION_TTL", 30*time.Minute),
+		RuntimeUsageOperationTTL:         envDuration("MNEMO_RUNTIME_USAGE_OPERATION_TTL", 30*time.Minute),
+		RuntimeUsageRetryBaseDelay:       runtimeUsageRetryBaseDelay,
+		RuntimeUsageRetryMaxDelay:        runtimeUsageRetryMaxDelay,
+		RuntimeUsageFailOpen:             runtimeUsageFailOpen,
+		RuntimeUsageOutboxEnabled:        runtimeUsageOutboxEnabled,
+		RuntimeUsageNoticeTimeout:        envDuration("MNEMO_RUNTIME_USAGE_NOTICE_TIMEOUT", time.Second),
+		RuntimeUsageNoticeCacheEnabled:   envBool("MNEMO_RUNTIME_USAGE_NOTICE_CACHE_ENABLED", true),
+		RuntimeUsageNoticeCacheTTL:       envDuration("MNEMO_RUNTIME_USAGE_NOTICE_CACHE_TTL", 30*time.Second),
+		RuntimeUsageNoticeStaleTTL:       envDuration("MNEMO_RUNTIME_USAGE_NOTICE_STALE_TTL", 2*time.Minute),
+		EncryptType:                      envOr("MNEMO_ENCRYPT_TYPE", "plain"),
+		EncryptKey:                       os.Getenv("MNEMO_ENCRYPT_KEY"),
+		DebugLLM:                         envBool("MNEMO_DEBUG_LLM", false),
+		ClusterBlacklist:                 parseClusterBlacklist(os.Getenv("MNEMO_CLUSTER_BLACKLIST")),
+		AutoSpendLimitEnabled:            envBool("MNEMO_AUTO_SPEND_LIMIT_ENABLED", false),
+		AutoSpendLimitIncrement:          envInt("MNEMO_AUTO_SPEND_LIMIT_INCREMENT", 500),
+		AutoSpendLimitMax:                envInt("MNEMO_AUTO_SPEND_LIMIT_MAX", 10000),
+		AutoSpendLimitCooldown:           envDuration("MNEMO_AUTO_SPEND_LIMIT_COOLDOWN", 1*time.Hour),
+		UTMEnabled:                       envBool("MNEMO_UTM_ENABLED", false),
+		CORSAllowedOrigins:               parseCSV(envOr("MNEMO_CORS_ALLOWED_ORIGINS", defaultCORSAllowedOrigins(env))),
 	}
 	// Validate ingest mode.
 	switch cfg.IngestMode {
@@ -170,7 +283,78 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("unsupported MNEMO_DB_BACKEND %q; valid values are \"tidb\", \"postgres\", and \"db9\"", cfg.DBBackend)
 	}
 
+	if cfg.AutoSpendLimitIncrement <= 0 {
+		return nil, fmt.Errorf("MNEMO_AUTO_SPEND_LIMIT_INCREMENT must be positive")
+	}
+	if cfg.AutoSpendLimitMax <= cfg.AutoSpendLimitIncrement {
+		return nil, fmt.Errorf("MNEMO_AUTO_SPEND_LIMIT_MAX must be greater than increment")
+	}
+	if cfg.AutoSpendLimitCooldown <= 0 {
+		return nil, fmt.Errorf("MNEMO_AUTO_SPEND_LIMIT_COOLDOWN must be positive")
+	}
+	if cfg.ChainRecallStopScore < 0 || cfg.ChainRecallStopScore > 1 {
+		return nil, fmt.Errorf("MNEMO_CHAIN_RECALL_STOP_SCORE must be between 0 and 1")
+	}
+	if cfg.RecallRequestTimeout <= 0 {
+		return nil, fmt.Errorf("MNEMO_RECALL_REQUEST_TIMEOUT must be positive")
+	}
+	if cfg.RecallResponseReserve < 0 {
+		return nil, fmt.Errorf("MNEMO_RECALL_RESPONSE_RESERVE must not be negative")
+	}
+	if cfg.RecallResponseReserve >= cfg.RecallRequestTimeout {
+		return nil, fmt.Errorf("MNEMO_RECALL_RESPONSE_RESERVE must be less than MNEMO_RECALL_REQUEST_TIMEOUT")
+	}
+	if cfg.RuntimeUsageNoticeTimeout <= 0 {
+		return nil, fmt.Errorf("MNEMO_RUNTIME_USAGE_NOTICE_TIMEOUT must be positive")
+	}
+	if cfg.RuntimeUsageNoticeCacheTTL <= 0 {
+		return nil, fmt.Errorf("MNEMO_RUNTIME_USAGE_NOTICE_CACHE_TTL must be positive")
+	}
+	if cfg.RuntimeUsageNoticeStaleTTL < 0 {
+		return nil, fmt.Errorf("MNEMO_RUNTIME_USAGE_NOTICE_STALE_TTL must not be negative")
+	}
+	if cfg.RuntimeUsageEnabled {
+		if cfg.RuntimeUsageRetryBaseDelay < runtimeusage.MinReservationRetryBaseDelay || cfg.RuntimeUsageRetryBaseDelay > runtimeusage.MaxReservationRetryBaseDelay {
+			return nil, fmt.Errorf(
+				"MNEMO_RUNTIME_USAGE_RESERVATION_RETRY_BASE_DELAY must be between %s and %s",
+				runtimeusage.MinReservationRetryBaseDelay,
+				runtimeusage.MaxReservationRetryBaseDelay,
+			)
+		}
+		if cfg.RuntimeUsageRetryMaxDelay < runtimeusage.MinReservationRetryMaxDelay || cfg.RuntimeUsageRetryMaxDelay > runtimeusage.MaxReservationRetryMaxDelay {
+			return nil, fmt.Errorf(
+				"MNEMO_RUNTIME_USAGE_RESERVATION_RETRY_MAX_DELAY must be between %s and %s",
+				runtimeusage.MinReservationRetryMaxDelay,
+				runtimeusage.MaxReservationRetryMaxDelay,
+			)
+		}
+		if cfg.RuntimeUsageRetryMaxDelay <= cfg.RuntimeUsageRetryBaseDelay {
+			return nil, fmt.Errorf("MNEMO_RUNTIME_USAGE_RESERVATION_RETRY_MAX_DELAY must be greater than MNEMO_RUNTIME_USAGE_RESERVATION_RETRY_BASE_DELAY")
+		}
+	}
+
 	return cfg, nil
+}
+
+func defaultCORSAllowedOrigins(env string) string {
+	switch env {
+	case "prod", "production":
+		return "https://mem9.ai"
+	default:
+		return "https://mem9.ai,http://localhost:4321,http://127.0.0.1:4321"
+	}
+}
+
+func parseCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func envOr(key, fallback string) string {
@@ -207,6 +391,15 @@ func envBool(key string, fallback bool) bool {
 	return fallback
 }
 
+func envBoolWithSet(key string, fallback bool) (bool, bool) {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b, true
+		}
+	}
+	return fallback, false
+}
+
 func envDuration(key string, fallback time.Duration) time.Duration {
 	if v := os.Getenv(key); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -216,9 +409,37 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 	return fallback
 }
 
+func envDurationStrict(key string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid duration: %w", key, &redactedDurationParseError{cause: err})
+	}
+	return duration, nil
+}
+
+type redactedDurationParseError struct {
+	cause error
+}
+
+func (e *redactedDurationParseError) Error() string {
+	return "invalid duration syntax"
+}
+
+func (e *redactedDurationParseError) Unwrap() error {
+	return e.cause
+}
+
 func parseClusterBlacklist(raw string) map[string]struct{} {
+	return parseCSVSet(raw)
+}
+
+func parseCSVSet(raw string) map[string]struct{} {
 	out := make(map[string]struct{})
-	for _, id := range strings.Split(raw, ",") {
+	for id := range strings.SplitSeq(raw, ",") {
 		if id := strings.TrimSpace(id); id != "" {
 			out[id] = struct{}{}
 		}
@@ -248,6 +469,33 @@ func parseMeteringURL(raw string) (string, error) {
 	return raw, nil
 }
 
+func parseRuntimeUsageBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("MNEMO_RUNTIME_USAGE_BASE_URL is required when MNEMO_RUNTIME_USAGE_ENABLED=true")
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid MNEMO_RUNTIME_USAGE_BASE_URL")
+	}
+	switch u.Scheme {
+	case "http", "https":
+		// ok
+	default:
+		return "", fmt.Errorf("invalid MNEMO_RUNTIME_USAGE_BASE_URL: unsupported scheme")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("invalid MNEMO_RUNTIME_USAGE_BASE_URL: host is required")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("invalid MNEMO_RUNTIME_USAGE_BASE_URL: query and fragment are not allowed")
+	}
+
+	u.Path = strings.TrimRight(u.Path, "/")
+	return u.String(), nil
+}
+
 // LogValue returns a slog.Value with sensitive fields masked.
 // Use this when logging the config to avoid leaking secrets.
 func (c *Config) LogValue() slog.Value {
@@ -256,6 +504,8 @@ func (c *Config) LogValue() slog.Value {
 		slog.String("DBBackend", c.DBBackend),
 		slog.String("EncryptType", c.EncryptType),
 		slog.Bool("EncryptKeyConfigured", c.EncryptKey != ""),
+		slog.Bool("RuntimeUsageEnabled", c.RuntimeUsageEnabled),
+		slog.Bool("RuntimeUsageInternalSecretConfigured", c.RuntimeUsageInternalSecret != ""),
 		// Add other non-sensitive fields as needed
 	)
 }

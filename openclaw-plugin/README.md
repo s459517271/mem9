@@ -2,7 +2,7 @@
 
 Memory plugin for [OpenClaw](https://github.com/openclaw) — replaces the built-in memory slot with cloud-persistent shared memory. Runs in server mode only, connecting to `mnemo-server` via `apiUrl` + `apiKey` (preferred) or legacy `tenantID`. Optional `provisionToken` and `provisionQueryParams` are used only during first-time create-new setup before an explicit `apiKey` is configured.
 
-When `apiKey` is absent during create-new onboarding, the plugin does not auto-provision on startup. Instead, the first post-restart user message triggers exactly one create-new provision through the normal hook path. The plugin coordinates that call across concurrent OpenClaw plugin registrations on the same machine and reuses the generated key locally for future restarts tied to the same `provisionToken`.
+When `apiKey` is absent during create-new onboarding, the plugin does not auto-provision on startup. Instead, the first post-restart OpenClaw agent turn that runs `before_prompt_build` triggers exactly one create-new provision. Setup/control chats such as TUI local embedded sessions may not run that plugin hook themselves, so onboarding can trigger one minimal OpenClaw agent turn to complete provisioning. The plugin coordinates that call across concurrent OpenClaw plugin registrations on the same machine and reuses the generated key locally for future restarts tied to the same `provisionToken`.
 
 ## 🚀 Quick Start (Server Mode)
 
@@ -31,6 +31,9 @@ Add mem9 to your project's `openclaw.json`:
     "entries": {
       "mem9": {
         "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           "apiUrl": "http://localhost:8080",
           "apiKey": "uuid",
@@ -146,6 +149,9 @@ Each agent uses the same `apiKey` for the shared memory pool. The plugin sends t
     "entries": {
       "mem9": {
         "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           "apiUrl": "http://your-server:8080",
           "apiKey": "uuid"
@@ -156,7 +162,7 @@ Each agent uses the same `apiKey` for the shared memory pool. The plugin sends t
 }
 ```
 
-That's it. The server handles scoping and conflict resolution. Conceptually, the only required values are `apiUrl` + `apiKey`.
+That's it. The server handles scoping and conflict resolution. Conceptually, the required mem9 credential values are `apiUrl` + `apiKey`; OpenClaw 4.23+ also needs the entry-level hook permission shown above for automatic conversation upload.
 
 ### Verify
 
@@ -176,7 +182,7 @@ Defined in `openclaw.plugin.json`:
 |---|---|---|
 | `apiUrl` | string | mnemo-server URL |
 | `apiKey` | string | Preferred key. Uses `/v1alpha2/mem9s/...` with `X-API-Key` header |
-| `provisionToken` | string | Optional one-time create-new token used locally to ensure the first-message create-new provision runs only once and is reused on this machine until an explicit `apiKey` is configured |
+| `provisionToken` | string | Optional one-time create-new token used locally to ensure create-new provisioning runs only once from an OpenClaw agent turn and is reused on this machine until an explicit `apiKey` is configured |
 | `provisionQueryParams` | object | Optional `utm_*` map forwarded only to the initial `POST /v1alpha1/mem9s` request made during create-new when `apiKey` is absent |
 | `defaultTimeoutMs` | number | Default timeout for non-search mem9 API requests in milliseconds. Default: `8000` |
 | `searchTimeoutMs` | number | Timeout for `memory_search` and automatic recall search in milliseconds. Default: `15000` |
@@ -185,6 +191,8 @@ Defined in `openclaw.plugin.json`:
 | `tenantID` | string | Legacy alias for `apiKey`. The plugin still uses `/v1alpha2/mem9s/...` with `X-API-Key`. |
 
 > **Note**: `apiKey` takes precedence when both fields are set. If only `tenantID` is present, the plugin treats it as a legacy alias for `apiKey`, still uses v1alpha2, and logs a deprecation warning once at startup. `provisionToken` and `provisionQueryParams` are ignored after an `apiKey` is already configured, and non-`utm_*` keys are dropped before the provision request is sent. During create-new onboarding, the plugin shares one in-flight provision result across concurrent local registrations and reuses the persisted result for the same `provisionToken`, so repeated reloads or repeated setup retries do not create multiple keys. The only valid secret path is `plugins.entries.mem9.config.apiKey`; `plugins.entries.mem9.apiKey` at the entry top level is invalid on OpenClaw and prevents the gateway from loading.
+
+OpenClaw 4.23+ / 2026.4.22+ requires the entry-level hook policy `plugins.entries.mem9.hooks.allowConversationAccess = true` for `agent_end` to include conversation messages. Without it, mem9 can still load, but automatic conversation upload cannot read the conversation to ingest it. This is an OpenClaw plugin-entry permission, not a mem9 `config` field. Older OpenClaw builds that reject this hook policy should omit the `hooks` block and upgrade for full automatic conversation upload.
 
 For debugging, set `"debug": true` in the plugin config. The plugin will emit `[mem9][debug]` lines; current coverage shows how `before_prompt_build` stripped OpenClaw metadata wrappers before issuing the recall search. `"debugRecall": true` still works as a deprecated alias.
 
@@ -201,8 +209,11 @@ Example:
 {
   "plugins": {
     "entries": {
-      "openclaw": {
+      "mem9": {
         "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           "apiUrl": "http://your-server:8080",
           "apiKey": "uuid",
@@ -236,6 +247,7 @@ openclaw-plugin/
 | `No mode configured` | Missing config | Add `apiUrl` and `apiKey` (or legacy `tenantID`) to plugin config |
 | `Server mode requires...` | Missing key | Add `apiKey` (or legacy `tenantID`) to config |
 | `config reload skipped (invalid config): plugins.entries.mem9: Unrecognized key: "apiKey"` | Setup wrote `plugins.entries.mem9.apiKey` instead of `plugins.entries.mem9.config.apiKey` | Remove the invalid top-level key and keep the secret only under `config.apiKey` |
-| Multiple auto-provisioned keys appear during create-new | Setup retriggered create-new provisioning before the first result was reused, or an older plugin still auto-provisions on startup | Upgrade to `@mem9/mem9@0.4.7+`; newer builds provision only from the first post-restart user message and reuse one local result across duplicate setup retries |
+| Multiple auto-provisioned keys appear during create-new | Setup retriggered create-new provisioning before the first result was reused, or an older plugin still auto-provisions on startup | Upgrade to `@mem9/mem9@0.4.7+`; newer builds provision only from an OpenClaw agent turn that runs `before_prompt_build` and reuse one local result across duplicate setup retries |
 | Search requests time out | Hybrid/vector search exceeds plugin timeout | Increase `searchTimeoutMs` in plugin config |
+| Conversations are not uploaded on OpenClaw 4.23+ | `agent_end` does not include conversation messages without explicit hook permission | Set `plugins.entries.mem9.hooks.allowConversationAccess` to `true` and restart OpenClaw |
 | Plugin not loading | Not in memory slot | Set `"slots": {"memory": "mem9"}` in openclaw.json |

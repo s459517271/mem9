@@ -2,14 +2,20 @@ package tenant
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/qiffang/mnemos/server/internal/domain"
 )
 
 func setupTiDBCloudEnv(t *testing.T) func() {
@@ -22,6 +28,174 @@ func setupTiDBCloudEnv(t *testing.T) func() {
 		os.Setenv("MNEMO_TIDBCLOUD_API_KEY", oldKey)
 		os.Setenv("MNEMO_TIDBCLOUD_API_SECRET", oldSecret)
 	}
+}
+
+type schemaInitConnector struct {
+	execs            []string
+	existingTables   map[string]bool
+	existingCols     map[string]bool
+	indexColumns     map[string][]string
+	nonUniqueIndexes map[string]bool
+	schemaRows       []schemaTestRow
+}
+
+func (c *schemaInitConnector) Connect(context.Context) (driver.Conn, error) {
+	return &schemaInitConn{recorder: c}, nil
+}
+
+func (c *schemaInitConnector) Driver() driver.Driver {
+	return schemaInitDriver{}
+}
+
+type schemaInitDriver struct{}
+
+func (schemaInitDriver) Open(string) (driver.Conn, error) {
+	return nil, fmt.Errorf("open not supported")
+}
+
+type schemaInitConn struct {
+	recorder *schemaInitConnector
+}
+
+func (c *schemaInitConn) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("prepare not supported")
+}
+
+func (c *schemaInitConn) Close() error { return nil }
+
+func (c *schemaInitConn) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("begin not supported")
+}
+
+func (c *schemaInitConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	c.recorder.execs = append(c.recorder.execs, query)
+	c.recorder.recordDDL(query)
+	return driver.RowsAffected(0), nil
+}
+
+func (c *schemaInitConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	lowerQuery := strings.ToLower(query)
+	if strings.Contains(lowerQuery, "information_schema.columns") {
+		if strings.Contains(query, "COUNT(*)") {
+			var count int64
+			if len(args) > 1 {
+				table, _ := args[0].Value.(string)
+				column, _ := args[1].Value.(string)
+				if c.recorder.existingCols[table+"."+column] {
+					count = 1
+				}
+			}
+			return &schemaInitRows{values: [][]driver.Value{{count}}}, nil
+		}
+		return &schemaRows{rows: c.recorder.schemaRows}, nil
+	}
+	if strings.Contains(lowerQuery, "information_schema.tables") {
+		var count int64
+		if len(args) > 0 {
+			if table, ok := args[0].Value.(string); ok && c.recorder.existingTables[table] {
+				count = 1
+			}
+		}
+		return &schemaInitRows{values: [][]driver.Value{{count}}}, nil
+	}
+	if strings.Contains(lowerQuery, "information_schema.statistics") || strings.Contains(lowerQuery, "pg_indexes") {
+		indexName := ""
+		if len(args) > 1 {
+			indexName, _ = args[1].Value.(string)
+		}
+		columns := c.recorder.indexColumns[indexName]
+		if strings.Contains(query, "COUNT(*)") {
+			var count int64
+			if len(columns) > 0 {
+				count = 1
+			}
+			return &schemaInitRows{values: [][]driver.Value{{count}}}, nil
+		}
+		if strings.Contains(lowerQuery, "non_unique") {
+			nonUnique := int64(0)
+			if c.recorder.nonUniqueIndexes[indexName] {
+				nonUnique = 1
+			}
+			values := make([][]driver.Value, 0, len(columns))
+			for _, column := range columns {
+				values = append(values, []driver.Value{column, nonUnique})
+			}
+			return &schemaInitRows{columns: []string{"COLUMN_NAME", "NON_UNIQUE"}, values: values}, nil
+		}
+		values := make([][]driver.Value, 0, len(columns))
+		for _, column := range columns {
+			values = append(values, []driver.Value{column})
+		}
+		return &schemaInitRows{columns: []string{"COLUMN_NAME"}, values: values}, nil
+	}
+	return nil, fmt.Errorf("unexpected query %q with args %v", query, args)
+}
+
+func (c *schemaInitConnector) recordDDL(query string) {
+	c.ensureMaps()
+	lowerQuery := strings.ToLower(query)
+	switch {
+	case strings.Contains(lowerQuery, "create table if not exists memories"):
+		c.existingTables["memories"] = true
+		c.existingCols["memories.app_id"] = true
+		c.indexColumns["idx_app"] = []string{"app_id"}
+	case strings.Contains(lowerQuery, "create table if not exists session_edits"):
+		c.existingTables["session_edits"] = true
+		c.existingCols["session_edits.edited_content"] = true
+	case strings.Contains(lowerQuery, "create table if not exists sessions"):
+		c.existingTables["sessions"] = true
+		c.existingCols["sessions.app_id"] = true
+		c.indexColumns["idx_sess_app"] = []string{"app_id"}
+		c.indexColumns["idx_sess_dedup"] = []string{"app_id", "session_id", "content_hash"}
+		c.nonUniqueIndexes["idx_sess_dedup"] = false
+	case strings.Contains(lowerQuery, "alter table memories add vector index idx_cosine"):
+		c.indexColumns["idx_cosine"] = []string{"embedding"}
+	case strings.Contains(lowerQuery, "alter table memories add fulltext index idx_fts_content"):
+		c.indexColumns["idx_fts_content"] = []string{"content"}
+	case strings.Contains(lowerQuery, "alter table sessions add vector index idx_sess_cosine"):
+		c.indexColumns["idx_sess_cosine"] = []string{"embedding"}
+	case strings.Contains(lowerQuery, "alter table sessions add fulltext index idx_sess_fts"):
+		c.indexColumns["idx_sess_fts"] = []string{"content"}
+	}
+}
+
+func (c *schemaInitConnector) ensureMaps() {
+	if c.existingTables == nil {
+		c.existingTables = map[string]bool{}
+	}
+	if c.existingCols == nil {
+		c.existingCols = map[string]bool{}
+	}
+	if c.indexColumns == nil {
+		c.indexColumns = map[string][]string{}
+	}
+	if c.nonUniqueIndexes == nil {
+		c.nonUniqueIndexes = map[string]bool{}
+	}
+}
+
+type schemaInitRows struct {
+	columns []string
+	values  [][]driver.Value
+	idx     int
+}
+
+func (r *schemaInitRows) Columns() []string {
+	if len(r.columns) > 0 {
+		return r.columns
+	}
+	return []string{"COUNT(*)"}
+}
+
+func (*schemaInitRows) Close() error { return nil }
+
+func (r *schemaInitRows) Next(dest []driver.Value) error {
+	if r.idx >= len(r.values) {
+		return io.EOF
+	}
+	copy(dest, r.values[r.idx])
+	r.idx++
+	return nil
 }
 
 // TestTiDBCloudProvisioner_Provision_Success tests successful cluster provisioning
@@ -89,7 +263,7 @@ func TestTiDBCloudProvisioner_Provision_Success(t *testing.T) {
 	defer server.Close()
 
 	// Create provisioner
-	p := NewTiDBCloudProvisioner(server.URL, "test-pool")
+	p := NewTiDBCloudProvisioner(server.URL, "test-pool", "", 0, 0, false)
 
 	ctx := context.Background()
 	info, err := p.Provision(ctx)
@@ -125,6 +299,106 @@ func TestTiDBCloudProvisioner_Provision_Success(t *testing.T) {
 	}
 }
 
+func TestTiDBCloudProvisioner_Provision_UsesPrivateLinkWhenPreferredAndServiceAllowed(t *testing.T) {
+	cleanup := setupTiDBCloudEnv(t)
+	defer cleanup()
+
+	server := newTiDBCloudTakeoverServer(t, tidbCloudTakeoverResponse(
+		"public.cluster.tidbcloud.com",
+		4000,
+		"private.cluster.tidbcloud.com",
+		4000,
+		"com.amazonaws.vpce.us-west-2.vpce-svc-allowed",
+	))
+	defer server.Close()
+
+	p := NewTiDBCloudProvisionerWithPrivateLink(server.URL, "test-pool", "", 0, 0, false, TiDBCloudPrivateLinkConfig{
+		Prefer: true,
+		ServiceNames: map[string]struct{}{
+			"com.amazonaws.vpce.us-west-2.vpce-svc-allowed": {},
+		},
+	})
+
+	info, err := p.Provision(context.Background())
+	if err != nil {
+		t.Fatalf("Provision failed: %v", err)
+	}
+	if info.Host != "private.cluster.tidbcloud.com" {
+		t.Fatalf("Host = %q, want private.cluster.tidbcloud.com", info.Host)
+	}
+	if info.Port != 4000 {
+		t.Fatalf("Port = %d, want 4000", info.Port)
+	}
+}
+
+func TestTiDBCloudProvisioner_Provision_FallsBackToPublicWhenPrivateLinkServiceNotAllowed(t *testing.T) {
+	cleanup := setupTiDBCloudEnv(t)
+	defer cleanup()
+
+	server := newTiDBCloudTakeoverServer(t, tidbCloudTakeoverResponse(
+		"public.cluster.tidbcloud.com",
+		4000,
+		"private.cluster.tidbcloud.com",
+		4000,
+		"com.amazonaws.vpce.us-west-2.vpce-svc-unconfigured",
+	))
+	defer server.Close()
+
+	p := NewTiDBCloudProvisionerWithPrivateLink(server.URL, "test-pool", "", 0, 0, false, TiDBCloudPrivateLinkConfig{
+		Prefer: true,
+		ServiceNames: map[string]struct{}{
+			"com.amazonaws.vpce.us-west-2.vpce-svc-allowed": {},
+		},
+	})
+
+	info, err := p.Provision(context.Background())
+	if err != nil {
+		t.Fatalf("Provision failed: %v", err)
+	}
+	if info.Host != "public.cluster.tidbcloud.com" {
+		t.Fatalf("Host = %q, want public.cluster.tidbcloud.com", info.Host)
+	}
+	if info.Port != 4000 {
+		t.Fatalf("Port = %d, want 4000", info.Port)
+	}
+}
+
+func newTiDBCloudTakeoverServer(t *testing.T, response map[string]interface{}) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			w.Header().Set("WWW-Authenticate", `Digest realm="tidbcloud", nonce="abc123", qop="auth"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("failed to encode response: %v", err)
+		}
+	}))
+}
+
+func tidbCloudTakeoverResponse(publicHost string, publicPort int, privateHost string, privatePort int, serviceName string) map[string]interface{} {
+	return map[string]interface{}{
+		"clusterId": "cluster-123",
+		"endpoints": map[string]interface{}{
+			"public": map[string]interface{}{
+				"host": publicHost,
+				"port": publicPort,
+			},
+			"private": map[string]interface{}{
+				"host": privateHost,
+				"port": privatePort,
+				"aws": map[string]interface{}{
+					"serviceName": serviceName,
+				},
+			},
+		},
+		"userPrefix": "test",
+	}
+}
+
 // TestTiDBCloudProvisioner_Provision_APIError tests error handling when API returns error
 func TestTiDBCloudProvisioner_Provision_APIError(t *testing.T) {
 	cleanup := setupTiDBCloudEnv(t)
@@ -143,7 +417,7 @@ func TestTiDBCloudProvisioner_Provision_APIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := NewTiDBCloudProvisioner(server.URL, "pool")
+	p := NewTiDBCloudProvisioner(server.URL, "pool", "", 0, 0, false)
 	ctx := context.Background()
 
 	_, err := p.Provision(ctx)
@@ -164,17 +438,423 @@ func TestTiDBCloudProvisioner_ProviderType(t *testing.T) {
 	}
 }
 
-// TestTiDBCloudProvisioner_InitSchema tests schema initialization (no-op)
-func TestTiDBCloudProvisioner_InitSchema(t *testing.T) {
+// TestTiDBCloudProvisioner_InitSchema_NilDB tests schema initialization error handling.
+func TestTiDBCloudProvisioner_InitSchema_NilDB(t *testing.T) {
 	cleanup := setupTiDBCloudEnv(t)
 	defer cleanup()
 
-	p := NewTiDBCloudProvisioner("http://localhost", "pool")
+	p := NewTiDBCloudProvisioner("http://localhost", "pool", "", 0, 0, false)
 
-	// InitSchema should return nil even with nil db (it's a no-op)
 	err := p.InitSchema(context.Background(), nil)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "db connection is nil") {
+		t.Fatalf("expected nil DB error, got %v", err)
+	}
+}
+
+func TestTiDBCloudProvisioner_InitSchema_AutoEmbedding(t *testing.T) {
+	p := NewTiDBCloudProvisioner("http://localhost", "pool", "tidbcloud_free/amazon/titan-embed-text-v2", 1024, 1536, true)
+	recorder := &schemaInitConnector{}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	if err := p.InitSchema(context.Background(), db); err != nil {
+		t.Fatalf("InitSchema failed: %v", err)
+	}
+
+	executed := strings.Join(recorder.execs, "\n")
+	wantSubstrings := []string{
+		"CREATE TABLE IF NOT EXISTS memories",
+		"embedding VECTOR(1024) GENERATED ALWAYS AS (EMBED_TEXT('tidbcloud_free/amazon/titan-embed-text-v2', content, '{\"dimensions\": 1024}')) STORED",
+		"ALTER TABLE memories ADD VECTOR INDEX idx_cosine",
+		"ALTER TABLE memories ADD FULLTEXT INDEX idx_fts_content",
+		"CREATE TABLE IF NOT EXISTS sessions",
+		"embedding VECTOR(1024) GENERATED ALWAYS AS (EMBED_TEXT('tidbcloud_free/amazon/titan-embed-text-v2', content, '{\"dimensions\": 1024}')) STORED",
+		"ALTER TABLE sessions ADD VECTOR INDEX idx_sess_cosine",
+		"ALTER TABLE sessions ADD FULLTEXT INDEX idx_sess_fts",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(executed, want) {
+			t.Fatalf("executed DDL missing %q\n%s", want, executed)
+		}
+	}
+}
+
+func TestTiDBCloudProvisioner_InitSchema_ClientEmbedding(t *testing.T) {
+	p := NewTiDBCloudProvisioner("http://localhost", "pool", "", 1024, 1536, false)
+	recorder := &schemaInitConnector{}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	if err := p.InitSchema(context.Background(), db); err != nil {
+		t.Fatalf("InitSchema failed: %v", err)
+	}
+
+	executed := strings.Join(recorder.execs, "\n")
+	wantSubstrings := []string{
+		"CREATE TABLE IF NOT EXISTS memories",
+		"embedding VECTOR(1536) NULL",
+		"ALTER TABLE memories ADD VECTOR INDEX idx_cosine",
+		"CREATE TABLE IF NOT EXISTS sessions",
+		"ALTER TABLE sessions ADD VECTOR INDEX idx_sess_cosine",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(executed, want) {
+			t.Fatalf("executed DDL missing %q\n%s", want, executed)
+		}
+	}
+	if strings.Contains(executed, "EMBED_TEXT(") {
+		t.Fatalf("client embedding schema should not use EMBED_TEXT:\n%s", executed)
+	}
+	if strings.Contains(executed, "FULLTEXT INDEX") {
+		t.Fatalf("FTS disabled schema should not create fulltext indexes:\n%s", executed)
+	}
+}
+
+func TestTiDBCloudProvisioner_InitSchema_ExistingTablesSkipsCreate(t *testing.T) {
+	p := NewTiDBCloudProvisioner("http://localhost", "pool", "", 1024, 1536, false)
+	recorder := &schemaInitConnector{
+		existingTables: map[string]bool{
+			"memories":      true,
+			"sessions":      true,
+			"session_edits": true,
+		},
+		existingCols: map[string]bool{
+			"memories.app_id":              true,
+			"sessions.app_id":              true,
+			"session_edits.edited_content": true,
+		},
+		indexColumns: map[string][]string{
+			"idx_app":        {"app_id"},
+			"idx_sess_app":   {"app_id"},
+			"idx_sess_dedup": {"app_id", "session_id", "content_hash"},
+		},
+	}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	if err := p.InitSchema(context.Background(), db); err != nil {
+		t.Fatalf("InitSchema failed: %v", err)
+	}
+
+	executed := strings.Join(recorder.execs, "\n")
+	if strings.Contains(executed, "CREATE TABLE") {
+		t.Fatalf("existing tables should skip CREATE TABLE:\n%s", executed)
+	}
+	wantSubstrings := []string{
+		"ALTER TABLE memories ADD VECTOR INDEX idx_cosine",
+		"ALTER TABLE sessions ADD VECTOR INDEX idx_sess_cosine",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(executed, want) {
+			t.Fatalf("executed DDL missing %q\n%s", want, executed)
+		}
+	}
+	unwantedSubstrings := []string{
+		"ALTER TABLE memories ADD COLUMN app_id",
+		"CREATE INDEX idx_app",
+		"ALTER TABLE sessions ADD COLUMN app_id",
+		"CREATE INDEX idx_sess_app",
+		"ALTER TABLE sessions DROP INDEX idx_sess_dedup",
+		"ALTER TABLE sessions ADD UNIQUE INDEX idx_sess_dedup",
+	}
+	for _, unwanted := range unwantedSubstrings {
+		if strings.Contains(executed, unwanted) {
+			t.Fatalf("existing tables should not run online app_id schema migration %q\n%s", unwanted, executed)
+		}
+	}
+}
+
+func TestTiDBCloudProvisioner_InitSchema_ExistingTablesRejectsStaleAppSchema(t *testing.T) {
+	p := NewTiDBCloudProvisioner("http://localhost", "pool", "", 1024, 1536, false)
+	recorder := &schemaInitConnector{
+		existingTables: map[string]bool{
+			"memories":      true,
+			"sessions":      true,
+			"session_edits": true,
+		},
+		existingCols: map[string]bool{
+			"memories.app_id": true,
+			"sessions.app_id": true,
+		},
+		indexColumns: map[string][]string{
+			"idx_app":          {"app_id"},
+			"idx_sessions_app": {"app_id"},
+			"idx_sess_dedup":   {"session_id", "content_hash"},
+		},
+	}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	err := p.InitSchema(context.Background(), db)
+	if err == nil {
+		t.Fatal("expected stale existing sessions schema to fail init")
+	}
+	if !strings.Contains(err.Error(), "sessions app_id index") {
+		t.Fatalf("expected sessions app_id index error, got %v", err)
+	}
+	executed := strings.Join(recorder.execs, "\n")
+	if !strings.Contains(executed, "ALTER TABLE sessions ADD VECTOR INDEX idx_sess_cosine") {
+		t.Fatalf("expected search index ensure before validation failure:\n%s", executed)
+	}
+	if strings.Contains(executed, "ALTER TABLE sessions ADD COLUMN app_id") ||
+		strings.Contains(executed, "ALTER TABLE sessions ADD UNIQUE INDEX idx_sess_dedup") {
+		t.Fatalf("stale app schema should not be migrated online:\n%s", executed)
+	}
+}
+
+func TestEnsureTiDBTenantRuntimeSchema_CreatesSearchIndexesOnly(t *testing.T) {
+	recorder := &schemaInitConnector{
+		existingTables: map[string]bool{
+			"memories":      true,
+			"sessions":      true,
+			"session_edits": true,
+		},
+		existingCols: map[string]bool{
+			"memories.app_id":              true,
+			"sessions.app_id":              true,
+			"session_edits.edited_content": true,
+		},
+		indexColumns: map[string][]string{
+			"idx_app":        {"app_id"},
+			"idx_sess_app":   {"app_id"},
+			"idx_sess_dedup": {"app_id", "session_id", "content_hash"},
+		},
+	}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	if err := EnsureTiDBTenantRuntimeSchema(context.Background(), db, "", 1024, 1536, true); err != nil {
+		t.Fatalf("EnsureTiDBTenantRuntimeSchema failed: %v", err)
+	}
+	executed := strings.Join(recorder.execs, "\n")
+	wantSubstrings := []string{
+		"ALTER TABLE memories ADD VECTOR INDEX idx_cosine",
+		"ALTER TABLE memories ADD FULLTEXT INDEX idx_fts_content",
+		"ALTER TABLE sessions ADD VECTOR INDEX idx_sess_cosine",
+		"ALTER TABLE sessions ADD FULLTEXT INDEX idx_sess_fts",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(executed, want) {
+			t.Fatalf("executed DDL missing %q\n%s", want, executed)
+		}
+	}
+	unwantedSubstrings := []string{
+		"ALTER TABLE memories ADD COLUMN app_id",
+		"CREATE INDEX idx_app",
+		"ALTER TABLE sessions ADD COLUMN app_id",
+		"CREATE INDEX idx_sess_app",
+		"ALTER TABLE sessions ADD UNIQUE INDEX idx_sess_dedup",
+	}
+	for _, unwanted := range unwantedSubstrings {
+		if strings.Contains(executed, unwanted) {
+			t.Fatalf("runtime ensure should not run app schema migration %q\n%s", unwanted, executed)
+		}
+	}
+}
+
+func TestValidateTiDBTenantRuntimeSchema_SuccessDoesNotMutate(t *testing.T) {
+	recorder := &schemaInitConnector{
+		existingTables: map[string]bool{
+			"memories":      true,
+			"sessions":      true,
+			"session_edits": true,
+		},
+		existingCols: map[string]bool{
+			"memories.app_id":              true,
+			"sessions.app_id":              true,
+			"session_edits.edited_content": true,
+		},
+		indexColumns: map[string][]string{
+			"idx_app":         {"app_id"},
+			"idx_cosine":      {"embedding"},
+			"idx_fts_content": {"content"},
+			"idx_sess_app":    {"app_id"},
+			"idx_sess_dedup":  {"app_id", "session_id", "content_hash"},
+			"idx_sess_cosine": {"embedding"},
+			"idx_sess_fts":    {"content"},
+		},
+	}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	if err := ValidateTiDBTenantRuntimeSchema(context.Background(), db, "", true); err != nil {
+		t.Fatalf("ValidateTiDBTenantRuntimeSchema failed: %v", err)
+	}
+	if len(recorder.execs) != 0 {
+		t.Fatalf("runtime schema validation should not execute DDL, got %v", recorder.execs)
+	}
+}
+
+func TestValidateTiDBTenantRuntimeSchema_RejectsOldSessionsDedupIndex(t *testing.T) {
+	recorder := &schemaInitConnector{
+		existingTables: map[string]bool{
+			"memories":      true,
+			"sessions":      true,
+			"session_edits": true,
+		},
+		existingCols: map[string]bool{
+			"memories.app_id": true,
+			"sessions.app_id": true,
+		},
+		indexColumns: map[string][]string{
+			"idx_app":         {"app_id"},
+			"idx_cosine":      {"embedding"},
+			"idx_sess_app":    {"app_id"},
+			"idx_sess_dedup":  {"session_id", "content_hash"},
+			"idx_sess_cosine": {"embedding"},
+		},
+	}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	err := ValidateTiDBTenantRuntimeSchema(context.Background(), db, "", false)
+	if err == nil {
+		t.Fatal("expected old sessions dedup index to fail validation")
+	}
+	if !strings.Contains(err.Error(), "sessions dedup index") {
+		t.Fatalf("expected sessions dedup index error, got %v", err)
+	}
+	if len(recorder.execs) != 0 {
+		t.Fatalf("runtime schema validation should not execute DDL, got %v", recorder.execs)
+	}
+}
+
+func TestValidateTiDBTenantRuntimeSchema_RejectsNonUniqueSessionsDedupIndex(t *testing.T) {
+	recorder := &schemaInitConnector{
+		existingTables: map[string]bool{
+			"memories":      true,
+			"sessions":      true,
+			"session_edits": true,
+		},
+		existingCols: map[string]bool{
+			"memories.app_id": true,
+			"sessions.app_id": true,
+		},
+		indexColumns: map[string][]string{
+			"idx_app":         {"app_id"},
+			"idx_cosine":      {"embedding"},
+			"idx_sess_app":    {"app_id"},
+			"idx_sess_dedup":  {"app_id", "session_id", "content_hash"},
+			"idx_sess_cosine": {"embedding"},
+		},
+		nonUniqueIndexes: map[string]bool{
+			"idx_sess_dedup": true,
+		},
+	}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	err := ValidateTiDBTenantRuntimeSchema(context.Background(), db, "", false)
+	if err == nil {
+		t.Fatal("expected non-unique sessions dedup index to fail validation")
+	}
+	if !strings.Contains(err.Error(), "is not unique") {
+		t.Fatalf("expected non-unique dedup index error, got %v", err)
+	}
+	if len(recorder.execs) != 0 {
+		t.Fatalf("runtime schema validation should not execute DDL, got %v", recorder.execs)
+	}
+}
+
+func TestValidatePostgresMemoryRuntimeSchema_IndexNames(t *testing.T) {
+	tests := []struct {
+		name      string
+		backend   string
+		indexName string
+	}{
+		{name: "postgres", backend: "postgres", indexName: "idx_app"},
+		{name: "db9", backend: "db9", indexName: "idx_memory_app"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := &schemaInitConnector{
+				existingCols: map[string]bool{
+					"memories.app_id": true,
+				},
+				indexColumns: map[string][]string{
+					tt.indexName: {"app_id"},
+				},
+			}
+			db := sql.OpenDB(recorder)
+			defer db.Close()
+
+			if err := ValidatePostgresMemoryRuntimeSchema(context.Background(), db, tt.backend); err != nil {
+				t.Fatalf("ValidatePostgresMemoryRuntimeSchema failed: %v", err)
+			}
+			if len(recorder.execs) != 0 {
+				t.Fatalf("runtime schema validation should not execute DDL, got %v", recorder.execs)
+			}
+		})
+	}
+}
+
+func TestValidatePostgresMemoryRuntimeSchema_RejectsMissingAppID(t *testing.T) {
+	recorder := &schemaInitConnector{
+		indexColumns: map[string][]string{
+			"idx_app": {"app_id"},
+		},
+	}
+	db := sql.OpenDB(recorder)
+	defer db.Close()
+
+	err := ValidatePostgresMemoryRuntimeSchema(context.Background(), db, "postgres")
+	if err == nil {
+		t.Fatal("expected missing app_id column to fail validation")
+	}
+	if !strings.Contains(err.Error(), "memories app_id column") {
+		t.Fatalf("expected memories app_id column error, got %v", err)
+	}
+}
+
+func TestTiDBCloudProvisioner_InitSchema_EmbeddingSchemaMismatch(t *testing.T) {
+	tests := []struct {
+		name            string
+		autoModel       string
+		schemaRows      []schemaTestRow
+		wantErrContains string
+	}{
+		{
+			name: "generated memory embedding with auto embedding disabled",
+			schemaRows: []schemaTestRow{
+				{table: "memories", extra: "STORED GENERATED"},
+			},
+			wantErrContains: "memories.embedding is a generated Auto Embed column",
+		},
+		{
+			name:      "regular session embedding with auto embedding enabled",
+			autoModel: "tidbcloud_free/amazon/titan-embed-text-v2",
+			schemaRows: []schemaTestRow{
+				{table: "sessions"},
+			},
+			wantErrContains: "sessions.embedding is a regular vector column",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewTiDBCloudProvisioner("http://localhost", "pool", tt.autoModel, 1024, 1536, false)
+			recorder := &schemaInitConnector{schemaRows: tt.schemaRows}
+			db := sql.OpenDB(recorder)
+			defer db.Close()
+
+			err := p.InitSchema(context.Background(), db)
+			if err == nil {
+				t.Fatal("expected schema compatibility error, got nil")
+			}
+			if !errors.Is(err, domain.ErrSchemaIncompatible) {
+				t.Fatalf("expected ErrSchemaIncompatible, got %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tt.wantErrContains)
+			}
+			if len(recorder.execs) != 0 {
+				t.Fatalf("schema mismatch should fail before DDL, got execs: %v", recorder.execs)
+			}
+		})
 	}
 }
 

@@ -22,22 +22,74 @@ import (
 // Note: MNEMO_TIDBCLOUD_API_KEY and MNEMO_TIDBCLOUD_API_SECRET are read via os.Getenv()
 // (not Config) as these are sensitive credentials that should not be persisted.
 type TiDBCloudProvisioner struct {
-	apiURL    string
-	apiKey    string
-	apiSecret string
-	poolID    string
-	client    *http.Client
+	apiURL                  string
+	apiKey                  string
+	apiSecret               string
+	poolID                  string
+	autoModel               string
+	autoDims                int
+	clientDims              int
+	ftsEnabled              bool
+	preferPrivateLink       bool
+	privateLinkServiceNames map[string]struct{}
+	client                  *http.Client
+}
+
+type TiDBCloudPrivateLinkConfig struct {
+	Prefer       bool
+	ServiceNames map[string]struct{}
+}
+
+type tidbCloudEndpoint struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
+type tidbCloudPrivateEndpoint struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	AWS  struct {
+		ServiceName string `json:"serviceName"`
+	} `json:"aws"`
+}
+
+type tidbCloudProvisionResponse struct {
+	ClusterID string `json:"clusterId"`
+	Endpoints struct {
+		Public  tidbCloudEndpoint        `json:"public"`
+		Private tidbCloudPrivateEndpoint `json:"private"`
+	} `json:"endpoints"`
+	UserPrefix string `json:"userPrefix"`
 }
 
 // NewTiDBCloudProvisioner creates a provisioner for TiDB Cloud Pool API.
-func NewTiDBCloudProvisioner(apiURL, poolID string) *TiDBCloudProvisioner {
+func NewTiDBCloudProvisioner(apiURL, poolID, autoModel string, autoDims int, clientDims int, ftsEnabled bool) *TiDBCloudProvisioner {
+	return NewTiDBCloudProvisionerWithPrivateLink(apiURL, poolID, autoModel, autoDims, clientDims, ftsEnabled, TiDBCloudPrivateLinkConfig{})
+}
+
+// NewTiDBCloudProvisionerWithPrivateLink creates a provisioner with optional AWS PrivateLink endpoint preference.
+func NewTiDBCloudProvisionerWithPrivateLink(apiURL, poolID, autoModel string, autoDims int, clientDims int, ftsEnabled bool, privateLink TiDBCloudPrivateLinkConfig) *TiDBCloudProvisioner {
 	return &TiDBCloudProvisioner{
-		apiURL:    apiURL,
-		apiKey:    os.Getenv("MNEMO_TIDBCLOUD_API_KEY"),
-		apiSecret: os.Getenv("MNEMO_TIDBCLOUD_API_SECRET"),
-		poolID:    poolID,
-		client:    &http.Client{Timeout: 60 * time.Second},
+		apiURL:                  apiURL,
+		apiKey:                  os.Getenv("MNEMO_TIDBCLOUD_API_KEY"),
+		apiSecret:               os.Getenv("MNEMO_TIDBCLOUD_API_SECRET"),
+		poolID:                  poolID,
+		autoModel:               autoModel,
+		autoDims:                autoDims,
+		clientDims:              clientDims,
+		ftsEnabled:              ftsEnabled,
+		preferPrivateLink:       privateLink.Prefer,
+		privateLinkServiceNames: copyStringSet(privateLink.ServiceNames),
+		client:                  &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+func copyStringSet(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for key := range in {
+		out[key] = struct{}{}
+	}
+	return out
 }
 
 // Provision acquires a cluster from the TiDB Cloud Pool.
@@ -68,30 +120,45 @@ func (p *TiDBCloudProvisioner) Provision(ctx context.Context) (*ClusterInfo, err
 		return nil, fmt.Errorf("tidb cloud provision: status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var result struct {
-		ClusterID string `json:"clusterId"`
-		Endpoints struct {
-			Public struct {
-				Host string `json:"host"`
-				Port int    `json:"port"`
-			} `json:"public"`
-		} `json:"endpoints"`
-		UserPrefix string `json:"userPrefix"`
-	}
+	var result tidbCloudProvisionResponse
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("tidb cloud provision: decode response: %w", err)
 	}
 
+	endpointInfo := p.selectConnectionEndpoint(result)
 	return &ClusterInfo{
 		ID:        uuid.New().String(),
 		ClusterID: result.ClusterID,
-		Host:      result.Endpoints.Public.Host,
-		Port:      result.Endpoints.Public.Port,
+		Host:      endpointInfo.Host,
+		Port:      endpointInfo.Port,
 		Username:  result.UserPrefix + ".root",
 		Password:  password,
 		DBName:    "test",
 	}, nil
+}
+
+func (p *TiDBCloudProvisioner) selectConnectionEndpoint(result tidbCloudProvisionResponse) tidbCloudEndpoint {
+	privateEndpoint := result.Endpoints.Private
+	if p.isPrivateLinkServiceAllowed(privateEndpoint.AWS.ServiceName) && privateEndpoint.Host != "" && privateEndpoint.Port != 0 {
+		return tidbCloudEndpoint{
+			Host: privateEndpoint.Host,
+			Port: privateEndpoint.Port,
+		}
+	}
+	return result.Endpoints.Public
+}
+
+func (p *TiDBCloudProvisioner) isPrivateLinkServiceAllowed(serviceName string) bool {
+	if !p.preferPrivateLink {
+		return false
+	}
+	serviceName = strings.TrimSpace(serviceName)
+	if serviceName == "" {
+		return false
+	}
+	_, ok := p.privateLinkServiceNames[serviceName]
+	return ok
 }
 
 const StarterProvisionerType = "tidb_cloud_starter"
@@ -101,11 +168,69 @@ func (p *TiDBCloudProvisioner) ProviderType() string {
 	return StarterProvisionerType
 }
 
-// InitSchema for TiDB Cloud Pool is intentionally a no-op.
-// The Pool API guarantees every claimed cluster already has the memories
-// table pre-created before takeover. If this guarantee is ever violated,
-// activation failure will surface at first memory write (no cluster_id context).
+var _ SpendLimitAdjuster = (*TiDBCloudProvisioner)(nil)
+
+// InitSchema creates or completes the tenant schema for TiDB Cloud Pool clusters.
+// Some deployments can use TiDB Cloud's pool init-schema feature, but it is not
+// required; these DDLs are idempotent when the pool already pre-created tables.
 func (p *TiDBCloudProvisioner) InitSchema(ctx context.Context, db *sql.DB) error {
+	return InitTiDBTenantSchema(ctx, db, p.autoModel, p.autoDims, p.clientDims, p.ftsEnabled)
+}
+
+// GetSpendLimit returns the monthly spend limit in USD cents.
+func (p *TiDBCloudProvisioner) GetSpendLimit(ctx context.Context, clusterID string) (int, error) {
+	endpoint := fmt.Sprintf("%s/v1beta1/clusters/%s", strings.TrimRight(p.apiURL, "/"), clusterID)
+	resp, err := p.doDigestAuthRequest(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, fmt.Errorf("get spend limit: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("get spend limit: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result struct {
+		SpendingLimit struct {
+			Monthly int `json:"monthly"`
+		} `json:"spendingLimit"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("get spend limit: decode response: %w", err)
+	}
+
+	return result.SpendingLimit.Monthly, nil
+}
+
+// IncreaseSpendLimit updates the monthly spend limit in USD cents.
+func (p *TiDBCloudProvisioner) IncreaseSpendLimit(ctx context.Context, clusterID string, monthlyCents int) error {
+	endpoint := fmt.Sprintf("%s/v1beta1/clusters/%s", strings.TrimRight(p.apiURL, "/"), clusterID)
+	payload := map[string]any{
+		"updateMask": "spendingLimit",
+		"cluster": map[string]any{
+			"spendingLimit": map[string]any{
+				"monthly": monthlyCents,
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal spend limit request body: %w", err)
+	}
+
+	resp, err := p.doDigestAuthRequest(ctx, "PATCH", endpoint, body)
+	if err != nil {
+		return fmt.Errorf("increase spend limit: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("increase spend limit: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
 	return nil
 }
 
@@ -185,7 +310,7 @@ func tokenizeDigestHeader(header string) []string {
 	var current strings.Builder
 	inQuote := false
 
-	for i := 0; i < len(header); i++ {
+	for i := range header {
 		ch := header[i]
 		switch ch {
 		case '"':

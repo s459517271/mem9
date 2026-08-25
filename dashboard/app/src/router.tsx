@@ -12,13 +12,25 @@ import { trackGa4PageView } from "@/lib/ga4";
 import type { MemoryType, MemoryFacet } from "@/types/memory";
 import type { AnalysisCategory } from "@/types/analysis";
 import type { TimeRangePreset } from "@/types/time-range";
+import { initializeConnectBootstrapFromLocation } from "@/lib/connect-bootstrap";
 import { trackMixpanelPageView } from "@/lib/mixpanel";
 import { ConnectPage } from "@/pages/connect";
+import { loadConnectRouteData } from "@/pages/connect-loader";
 import { SpacePage } from "@/pages/space";
 
 const PixelFarmPage = lazy(async () => {
   const module = await import("@/pages/pixel-farm");
   return { default: module.PixelFarmPage };
+});
+
+const ReportPdfPage = lazy(async () => {
+  const module = await import("@/pages/report-pdf");
+  return { default: module.ReportPdfPage };
+});
+
+const TemplateReportPage = lazy(async () => {
+  const module = await import("@/pages/template-report");
+  return { default: module.TemplateReportPage };
 });
 
 function PixelFarmRoutePage() {
@@ -33,6 +45,34 @@ function PixelFarmRoutePage() {
       }
     >
       <PixelFarmPage />
+    </Suspense>
+  );
+}
+
+function ReportPdfRoutePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-[#f3f7fc] text-sm font-semibold uppercase tracking-[0.2em] text-[#64748b]">
+          Loading report
+        </main>
+      }
+    >
+      <ReportPdfPage />
+    </Suspense>
+  );
+}
+
+function TemplateReportRoutePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-[#05070c] text-sm font-semibold uppercase tracking-[0.2em] text-[#a996f6]">
+          Loading report
+        </main>
+      }
+    >
+      <TemplateReportPage />
     </Suspense>
   );
 }
@@ -58,6 +98,8 @@ function RootLayout() {
   );
 }
 
+initializeConnectBootstrapFromLocation();
+
 const rootRoute = createRootRoute({
   component: RootLayout,
 });
@@ -66,6 +108,7 @@ const connectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: ConnectPage,
+  loader: loadConnectRouteData,
 });
 
 const VALID_TYPES = ["pinned", "insight"];
@@ -128,10 +171,22 @@ const pixelFarmRoute = createRoute({
   path: "/labs/memory-farm",
   component: PixelFarmRoutePage,
 });
+const reportPdfRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/report-pdf",
+  component: ReportPdfRoutePage,
+});
+const templateReportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/template-report",
+  component: TemplateReportRoutePage,
+});
 const baseRoutes: Parameters<typeof rootRoute.addChildren>[0] = [
   connectRoute,
   spaceRoute,
   pixelFarmRoute,
+  reportPdfRoute,
+  templateReportRoute,
 ];
 
 let devRoutes: Parameters<typeof rootRoute.addChildren>[0] = [];

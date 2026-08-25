@@ -38,9 +38,13 @@ type memoryRepoMock struct {
 	lastAutoVectorFilter domain.MemoryFilter
 	lastKeywordFilter    domain.MemoryFilter
 	lastFTSFilter        domain.MemoryFilter
+	vectorSearchHook     func(context.Context, []float32, domain.MemoryFilter, int) ([]domain.Memory, error)
 	autoVectorSearchHook func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error)
 	keywordSearchHook    func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error)
 	ftsSearchHook        func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error)
+	embeddingLookup      map[string][]float32
+	embeddingLookupErr   error
+	embeddingLookupCalls [][]string
 	bulkSoftDeleteCalls  [][]string
 	bulkSoftDeleteAgent  string
 	bulkSoftDeleteResult int64
@@ -50,6 +54,19 @@ type memoryRepoMock struct {
 type setStateCall struct {
 	ID    string
 	State domain.MemoryState
+}
+
+func requireExternalSourceMessageID(t *testing.T, metadata json.RawMessage, want string) {
+	t.Helper()
+	var decoded struct {
+		ExternalProvenance *ExternalProvenance `json:"external_provenance"`
+	}
+	if err := json.Unmarshal(metadata, &decoded); err != nil {
+		t.Fatalf("metadata unmarshal error = %v: %s", err, metadata)
+	}
+	if decoded.ExternalProvenance == nil || decoded.ExternalProvenance.Schema != ExternalProvenanceSchema || decoded.ExternalProvenance.SourceMessageID != want {
+		t.Fatalf("external_provenance = %+v, want schema=%s source=%s", decoded.ExternalProvenance, ExternalProvenanceSchema, want)
+	}
 }
 
 func (m *memoryRepoMock) Create(ctx context.Context, mem *domain.Memory) error {
@@ -125,6 +142,25 @@ func TestNormalizeTemporalFacts_ResolvesNextMonthAgainstTimestamp(t *testing.T) 
 	}
 	if got[0].Text != "Melanie is planning to go camping in June 2023" {
 		t.Fatalf("normalized fact = %q, want %q", got[0].Text, "Melanie is planning to go camping in June 2023")
+	}
+}
+
+func TestNormalizeTemporalFacts_UsesAssistantTimestampWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	input := prepareExtractionInputWithPolicy([]IngestMessage{
+		{Role: "user", Content: "When is the mem9 migration scheduled?"},
+		{Role: "assistant", Content: "[1:14 pm on 25 May, 2023] The mem9 migration is scheduled next month."},
+	}, maxExtractionConversationRunes, true)
+
+	got := normalizeTemporalFacts(input, []ExtractedFact{
+		{Text: "The mem9 migration is scheduled next month", Tags: []string{"work", "timeline"}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(got))
+	}
+	if got[0].Text != "The mem9 migration is scheduled in June 2023" {
+		t.Fatalf("normalized fact = %q, want %q", got[0].Text, "The mem9 migration is scheduled in June 2023")
 	}
 }
 
@@ -368,6 +404,408 @@ func TestExtractPhase1FactTagsPopulated(t *testing.T) {
 	}
 }
 
+func TestExtractPhase1IncludesAssistantFactsWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	var systemPrompt string
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode llm request: %v", err)
+		}
+		if len(req.Messages) > 0 {
+			systemPrompt = req.Messages[0].Content
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": `{"facts": [{"text": "The mem9 Go API is the source of truth for memory data", "tags": ["architecture"]}], "message_tags": [["question"], ["architecture"]]}`}},
+			},
+		})
+	}))
+	defer mockLLM.Close()
+
+	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+	svc := NewIngestService(
+		&memoryRepoMock{},
+		llmClient,
+		nil,
+		"auto-model",
+		ModeSmart,
+		WithAssistantFactExtraction(true),
+	)
+
+	result, err := svc.ExtractPhase1(context.Background(), []IngestMessage{
+		{Role: "user", Content: "Which component is authoritative?", Seq: intPtr(10)},
+		{Role: "assistant", Content: "The mem9 Go API is the source of truth for memory data.", Seq: intPtr(11)},
+	})
+	if err != nil {
+		t.Fatalf("ExtractPhase1() error = %v", err)
+	}
+	if !strings.Contains(systemPrompt, "Extract durable facts from both user and assistant messages") {
+		t.Fatalf("assistant extraction rule missing from prompt:\n%s", systemPrompt)
+	}
+	if strings.Contains(systemPrompt, "Extract facts ONLY from the user's messages") {
+		t.Fatalf("user-only extraction rule should be disabled:\n%s", systemPrompt)
+	}
+	if len(result.Facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(result.Facts))
+	}
+	if !reflect.DeepEqual(result.Facts[0].SourceSeqs, []int{11}) {
+		t.Fatalf("source seqs = %v, want [11]", result.Facts[0].SourceSeqs)
+	}
+	if len(result.Facts[0].SourceTurns) != 1 {
+		t.Fatalf("source turns = %+v, want one assistant turn", result.Facts[0].SourceTurns)
+	}
+	turn := result.Facts[0].SourceTurns[0]
+	if turn.Seq != 11 || turn.Role != "assistant" || turn.Content != "The mem9 Go API is the source of truth for memory data." {
+		t.Fatalf("source turn = %+v, want assistant seq 11", turn)
+	}
+}
+
+func TestExtractPhase1WithoutRoutingOmitsRoutingPrompt(t *testing.T) {
+	var systemPrompt string
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode llm request: %v", err)
+		}
+		if len(req.Messages) > 0 {
+			systemPrompt = req.Messages[0].Content
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": `{"facts": [{"text": "Uses Go 1.22", "tags": ["tech"]}], "message_tags": [["tech"]]}`}},
+			},
+		})
+	}))
+	defer mockLLM.Close()
+
+	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+	svc := NewIngestService(&memoryRepoMock{}, llmClient, nil, "auto-model", ModeSmart)
+
+	if _, err := svc.ExtractPhase1(context.Background(), []IngestMessage{{Role: "user", Content: "I use Go 1.22"}}); err != nil {
+		t.Fatalf("ExtractPhase1() error = %v", err)
+	}
+	if strings.Contains(systemPrompt, "Space Chain routing") {
+		t.Fatalf("routing section should be omitted without routing targets")
+	}
+	if strings.Contains(systemPrompt, "route_targets") {
+		t.Fatalf("route_targets should be omitted without routing targets")
+	}
+	if !strings.Contains(systemPrompt, "Extract facts ONLY from the user's messages") {
+		t.Fatalf("default extraction prompt must remain user-only:\n%s", systemPrompt)
+	}
+	if strings.Contains(systemPrompt, "Extract durable facts from both user and assistant messages") {
+		t.Fatalf("assistant extraction must remain opt-in:\n%s", systemPrompt)
+	}
+}
+
+func TestExtractionPromptsRequireDurableFactsOnly(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		invoke   func(*IngestService) error
+	}{
+		{
+			name:     "facts only",
+			response: `{"facts": [{"text": "Uses Go 1.22", "tags": ["tech"]}]}`,
+			invoke: func(svc *IngestService) error {
+				_, err := svc.ExtractContentWithRouting(context.Background(), "I use Go 1.22", nil)
+				return err
+			},
+		},
+		{
+			name:     "facts and message tags",
+			response: `{"facts": [{"text": "Uses Go 1.22", "tags": ["tech"]}], "message_tags": [["tech"]]}`,
+			invoke: func(svc *IngestService) error {
+				_, err := svc.ExtractPhase1(context.Background(), []IngestMessage{{Role: "user", Content: "I use Go 1.22"}})
+				return err
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var systemPrompt string
+			mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					Messages []struct {
+						Content string `json:"content"`
+					} `json:"messages"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Fatalf("decode llm request: %v", err)
+				}
+				if len(req.Messages) > 0 {
+					systemPrompt = req.Messages[0].Content
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{
+					"choices": []map[string]any{
+						{"message": map[string]string{"content": tc.response}},
+					},
+				})
+			}))
+			defer mockLLM.Close()
+
+			llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+			svc := NewIngestService(&memoryRepoMock{}, llmClient, nil, "auto-model", ModeSmart)
+			if err := tc.invoke(svc); err != nil {
+				t.Fatalf("extract: %v", err)
+			}
+
+			for _, want := range []string{
+				"omit it from the facts array entirely",
+				"never emit them as facts",
+				`The "facts" array must contain durable facts only`,
+			} {
+				if !strings.Contains(systemPrompt, want) {
+					t.Fatalf("durable-only extraction prompt missing %q in:\n%s", want, systemPrompt)
+				}
+			}
+			for _, unwanted := range []string{
+				`"fact_type": "query_intent"`,
+				`"fact_type": "transient_status"`,
+				`"fact_type": "ephemeral_intent"`,
+				`"fact_type": "activity_log"`,
+				`"fact_type": "operational_log"`,
+			} {
+				if strings.Contains(systemPrompt, unwanted) {
+					t.Fatalf("durable-only extraction prompt still emits %q in:\n%s", unwanted, systemPrompt)
+				}
+			}
+		})
+	}
+}
+
+func TestExtractPhase1WithRoutingIncludesPromptAndParsesTargets(t *testing.T) {
+	var systemPrompt string
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode llm request: %v", err)
+		}
+		if len(req.Messages) > 0 {
+			systemPrompt = req.Messages[0].Content
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": `{"facts": [{"text": "mem9 uses Go for the API server", "tags": ["tech"], "route_targets": ["space_mem9", "space_team_rules"]}], "message_tags": [["tech"]]}`}},
+			},
+		})
+	}))
+	defer mockLLM.Close()
+
+	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+	svc := NewIngestService(&memoryRepoMock{}, llmClient, nil, "auto-model", ModeSmart)
+
+	result, err := svc.ExtractPhase1WithRouting(context.Background(), []IngestMessage{{Role: "user", Content: "mem9 uses Go for the API server"}}, []RoutingTarget{
+		{ID: "space_mem9", Name: "mem9 project knowledge", Rule: "facts about mem9"},
+		{ID: "space_team_rules", Name: "team collaboration", Rule: "facts about team rules"},
+	})
+	if err != nil {
+		t.Fatalf("ExtractPhase1WithRouting() error = %v", err)
+	}
+	if len(result.Facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(result.Facts))
+	}
+	if got, want := result.Facts[0].RouteTargets, []string{"space_mem9", "space_team_rules"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("route targets = %v, want %v", got, want)
+	}
+	for _, want := range []string{
+		"Rules — Space Chain routing",
+		"Allowed routing targets",
+		"you must classify every extracted fact for routing",
+		"evaluate every allowed target rule independently",
+		"Semantic matches count even when the fact was rewritten, shortened, split, or translated during extraction",
+		`Treat each "rule" as a natural-language judgement prompt, not as a tag or exact keyword list`,
+		"Entity names, product names, project names, organization names, and acronyms mentioned in a rule are strong routing signals",
+		`A short rule such as "和mem9有关" means route facts about, mentioning, or clearly related to mem9`,
+		`A short rule such as "和PingCAP有关" means route facts about, mentioning, or clearly related to PingCAP`,
+		"space_mem9",
+		"space_team_rules",
+		`Do not put routing target IDs into "tags"`,
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("routing prompt missing %q in:\n%s", want, systemPrompt)
+		}
+	}
+}
+
+func TestExtractPhase1AnnotatesSourceSeqs(t *testing.T) {
+	t.Parallel()
+
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := `{"facts": [{"text": "Jon lost his job, which motivated him to start his own dance studio", "tags": ["work", "dance"]}], "message_tags": [["career"], ["answer"]]}`
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": resp}},
+			},
+		})
+	}))
+	defer mockLLM.Close()
+
+	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+	svc := NewIngestService(&memoryRepoMock{}, llmClient, nil, "auto-model", ModeSmart)
+
+	result, err := svc.ExtractPhase1(context.Background(), []IngestMessage{
+		{Role: "user", Content: "[date:1 January 2023] [speaker:Jon] I lost my job and decided to start my own dance studio.", Seq: intPtr(41)},
+		{Role: "assistant", Content: "That is a big step.", Seq: intPtr(42)},
+	})
+	if err != nil {
+		t.Fatalf("ExtractPhase1() error = %v", err)
+	}
+	if len(result.Facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(result.Facts))
+	}
+	if !reflect.DeepEqual(result.Facts[0].SourceSeqs, []int{41}) {
+		t.Fatalf("expected source seq [41], got %v", result.Facts[0].SourceSeqs)
+	}
+	if len(result.Facts[0].SourceTurns) != 1 || result.Facts[0].SourceTurns[0].Seq != 41 {
+		t.Fatalf("expected source turn seq [41], got %+v", result.Facts[0].SourceTurns)
+	}
+}
+
+func TestReconcilePhase2PersistsSourceSeqMetadata(t *testing.T) {
+	t.Parallel()
+
+	memRepo := &memoryRepoMock{}
+	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
+
+	_, err := svc.ReconcilePhase2(context.Background(), "agent-1", "agent-1", "", "sess-1", []ExtractedFact{
+		{Text: "Jon lost his job, which motivated him to start a dance studio", Tags: []string{"work"}, SourceSeqs: []int{4, 2, 4}},
+	}, &ExternalProvenance{Schema: ExternalProvenanceSchema, SourceMessageID: "message_user"})
+	if err != nil {
+		t.Fatalf("ReconcilePhase2() error = %v", err)
+	}
+	if len(memRepo.createCalls) != 1 {
+		t.Fatalf("expected 1 created memory, got %d", len(memRepo.createCalls))
+	}
+	var metadata struct {
+		SourceSeqs         []int                `json:"source_seqs"`
+		SourceTurns        []sourceTurnMetadata `json:"source_turns"`
+		ExternalProvenance *ExternalProvenance  `json:"external_provenance"`
+	}
+	if err := json.Unmarshal(memRepo.createCalls[0].Metadata, &metadata); err != nil {
+		t.Fatalf("metadata unmarshal error = %v", err)
+	}
+	if !reflect.DeepEqual(metadata.SourceSeqs, []int{2, 4}) {
+		t.Fatalf("source_seqs = %v, want [2 4]", metadata.SourceSeqs)
+	}
+	if len(metadata.SourceTurns) != 0 {
+		t.Fatalf("source_turns should be empty when facts did not provide turn payloads, got %+v", metadata.SourceTurns)
+	}
+	if metadata.ExternalProvenance == nil || metadata.ExternalProvenance.SourceMessageID != "message_user" {
+		t.Fatalf("external_provenance = %+v, want message_user", metadata.ExternalProvenance)
+	}
+}
+
+func TestReconcilePhase2AddPersistsSourceTurnMetadata(t *testing.T) {
+	t.Parallel()
+
+	memRepo := &memoryRepoMock{}
+	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
+
+	_, err := svc.ReconcilePhase2(context.Background(), "agent-1", "agent-1", "", "sess-1", []ExtractedFact{
+		{
+			Text:       "Jon lost his job, which motivated him to start a dance studio",
+			Tags:       []string{"work"},
+			SourceSeqs: []int{4, 2, 4},
+			SourceTurns: []sourceTurnMetadata{
+				{Seq: 4, Content: "[date:1 January 2023] [speaker:Jon] I lost my job and decided to start a dance studio."},
+				{Seq: 2, Content: "[date:1 January 2023] [speaker:Gina] You should open your own studio."},
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("ReconcilePhase2() error = %v", err)
+	}
+	if len(memRepo.createCalls) != 1 {
+		t.Fatalf("expected 1 created memory, got %d", len(memRepo.createCalls))
+	}
+	var metadata struct {
+		SourceSeqs  []int                `json:"source_seqs"`
+		SourceTurns []sourceTurnMetadata `json:"source_turns"`
+	}
+	if err := json.Unmarshal(memRepo.createCalls[0].Metadata, &metadata); err != nil {
+		t.Fatalf("metadata unmarshal error = %v", err)
+	}
+	if !reflect.DeepEqual(metadata.SourceSeqs, []int{2, 4}) {
+		t.Fatalf("source_seqs = %v, want [2 4]", metadata.SourceSeqs)
+	}
+	if len(metadata.SourceTurns) != 2 || metadata.SourceTurns[0].Seq != 2 || metadata.SourceTurns[1].Seq != 4 {
+		t.Fatalf("source_turns = %+v, want seqs [2 4]", metadata.SourceTurns)
+	}
+}
+
+func TestSetSourceSeqMetadataClearsStaleSourceSeqs(t *testing.T) {
+	t.Parallel()
+
+	metadata := SetSourceSeqMetadata(json.RawMessage(`{"source_seqs":[1,2],"temporal":{"display":"2023"}}`), nil)
+	var decoded map[string]any
+	if err := json.Unmarshal(metadata, &decoded); err != nil {
+		t.Fatalf("metadata unmarshal error = %v", err)
+	}
+	if _, ok := decoded["source_seqs"]; ok {
+		t.Fatalf("source_seqs should be removed from metadata: %s", metadata)
+	}
+	if _, ok := decoded["temporal"]; !ok {
+		t.Fatalf("temporal metadata should be preserved: %s", metadata)
+	}
+}
+
+func TestSetExternalProvenanceMetadataPreservesLegacyNonObjectWithoutProvenance(t *testing.T) {
+	legacy := json.RawMessage(`"legacy-metadata"`)
+
+	if got := SetExternalProvenanceMetadata(legacy, nil); string(got) != string(legacy) {
+		t.Fatalf("metadata = %s, want unchanged %s", got, legacy)
+	}
+}
+
+func TestSetExternalProvenanceMetadataPreservesLegacyEmptyObject(t *testing.T) {
+	legacy := json.RawMessage(`{}`)
+
+	if got := SetExternalProvenanceMetadata(legacy, nil); string(got) != string(legacy) {
+		t.Fatalf("metadata = %s, want unchanged %s", got, legacy)
+	}
+}
+
+func TestPreserveExternalProvenanceMetadataKeepsLegacyNonObjectUpdateBehavior(t *testing.T) {
+	for _, update := range []json.RawMessage{
+		json.RawMessage(`null`),
+		json.RawMessage(`"replacement"`),
+		json.RawMessage(`["replacement"]`),
+		json.RawMessage(`42`),
+		json.RawMessage(`true`),
+	} {
+		got, err := preserveExternalProvenanceMetadata(json.RawMessage(`{"old":"value"}`), update)
+		if err != nil {
+			t.Fatalf("update %s returned error: %v", update, err)
+		}
+		if string(got) != string(update) {
+			t.Fatalf("metadata = %s, want replacement %s", got, update)
+		}
+	}
+}
+
 func TestExtractFactsSingleMessageUsesLLMExtraction(t *testing.T) {
 	t.Parallel()
 
@@ -442,7 +880,7 @@ func TestExtractPhase1SingleMessageUsesLLMExtraction(t *testing.T) {
 	}
 }
 
-func TestExtractFactsEmptyResultFallsBackToRawFact(t *testing.T) {
+func TestExtractFactsEmptyResultReturnsNoFacts(t *testing.T) {
 	t.Parallel()
 
 	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -462,12 +900,12 @@ func TestExtractFactsEmptyResultFallsBackToRawFact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("extractFacts() error = %v", err)
 	}
-	if len(facts) != 1 || facts[0].FactType != factTypeRawFallback || facts[0].Text != "I use Go 1.22" {
-		t.Fatalf("expected raw fallback fact after empty extraction, got %v", facts)
+	if len(facts) != 0 {
+		t.Fatalf("expected no facts after empty extraction, got %v", facts)
 	}
 }
 
-func TestExtractFactsSingleMessageEmptyResultFallsBackToRawFact(t *testing.T) {
+func TestExtractFactsSingleMessageEmptyResultReturnsNoFacts(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
@@ -492,12 +930,66 @@ func TestExtractFactsSingleMessageEmptyResultFallsBackToRawFact(t *testing.T) {
 	if callCount != 1 {
 		t.Fatalf("expected 1 LLM call for single-message extraction, got %d", callCount)
 	}
-	if len(facts) != 1 || facts[0].FactType != factTypeRawFallback || facts[0].Text != "I use Go 1.22" {
-		t.Fatalf("expected raw fallback fact after empty extraction, got %v", facts)
+	if len(facts) != 0 {
+		t.Fatalf("expected no facts after empty extraction, got %v", facts)
 	}
 }
 
-func TestExtractPhase1SingleMessageEmptyResultFallsBackToRawFact(t *testing.T) {
+func TestIngestExtractionLLMFailureReturnsFailedStatus(t *testing.T) {
+	t.Parallel()
+
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+	}))
+	defer mockLLM.Close()
+
+	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+	memRepo := &memoryRepoMock{}
+	svc := NewIngestService(memRepo, llmClient, nil, "auto-model", ModeSmart)
+
+	res, err := svc.Ingest(context.Background(), "agent-1", IngestRequest{
+		Mode:      ModeSmart,
+		SessionID: "sess-extraction-failure",
+		AgentID:   "agent-1",
+		Messages: []IngestMessage{
+			{Role: "user", Content: "I use Go 1.22"},
+			{Role: "assistant", Content: "Noted."},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Ingest() error = %v", err)
+	}
+	if res == nil || res.Status != "failed" {
+		t.Fatalf("expected failed ingest result, got %+v", res)
+	}
+	if len(memRepo.createCalls) != 0 {
+		t.Fatalf("expected no create calls after extraction failure, got %d", len(memRepo.createCalls))
+	}
+}
+
+func TestExtractPhase1ExtractionLLMFailureReturnsError(t *testing.T) {
+	t.Parallel()
+
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+	}))
+	defer mockLLM.Close()
+
+	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+	svc := NewIngestService(&memoryRepoMock{}, llmClient, nil, "auto-model", ModeSmart)
+
+	result, err := svc.ExtractPhase1(context.Background(), []IngestMessage{
+		{Role: "user", Content: "I use Go 1.22"},
+	})
+	if err == nil {
+		t.Fatal("expected ExtractPhase1() error after extraction LLM failure")
+	}
+	if result != nil {
+		t.Fatalf("expected nil result after extraction LLM failure, got %+v", result)
+	}
+}
+
+func TestExtractPhase1SingleMessageEmptyResultReturnsNoFacts(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
@@ -524,15 +1016,15 @@ func TestExtractPhase1SingleMessageEmptyResultFallsBackToRawFact(t *testing.T) {
 	if callCount != 1 {
 		t.Fatalf("expected 1 LLM call for single-message extraction, got %d", callCount)
 	}
-	if len(result.Facts) != 1 || result.Facts[0].FactType != factTypeRawFallback || result.Facts[0].Text != "I use Go 1.22" {
-		t.Fatalf("expected raw fallback fact after empty extraction, got %v", result.Facts)
+	if len(result.Facts) != 0 {
+		t.Fatalf("expected no facts after empty extraction, got %v", result.Facts)
 	}
 	if len(result.MessageTags) != 1 || len(result.MessageTags[0]) != 1 || result.MessageTags[0][0] != "tech" {
 		t.Fatalf("expected message_tags[0] = [tech], got %v", result.MessageTags)
 	}
 }
 
-func TestExtractFactsRetryFallbackDropsFlattenedQueryIntent(t *testing.T) {
+func TestExtractFactsRetryRecoveryDropsFlattenedQueryIntent(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
@@ -563,18 +1055,12 @@ func TestExtractFactsRetryFallbackDropsFlattenedQueryIntent(t *testing.T) {
 	if callCount != 2 {
 		t.Fatalf("expected 2 LLM calls, got %d", callCount)
 	}
-	if len(facts) != 1 {
-		t.Fatalf("expected 1 raw fallback fact, got %v", facts)
-	}
-	if facts[0].FactType != factTypeRawFallback {
-		t.Fatalf("expected fact_type %q, got %q", factTypeRawFallback, facts[0].FactType)
-	}
-	if facts[0].Text != "how do I configure nginx?" {
-		t.Fatalf("expected fallback text to preserve user content, got %q", facts[0].Text)
+	if len(facts) != 0 {
+		t.Fatalf("expected query_intent-only extraction to return no facts, got %v", facts)
 	}
 }
 
-func TestExtractFactsAndTagsRetryFallbackDropsFlattenedQueryIntent(t *testing.T) {
+func TestExtractFactsAndTagsRetryRecoveryDropsFlattenedQueryIntent(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
@@ -605,8 +1091,8 @@ func TestExtractFactsAndTagsRetryFallbackDropsFlattenedQueryIntent(t *testing.T)
 	if callCount != 2 {
 		t.Fatalf("expected 2 LLM calls, got %d", callCount)
 	}
-	if len(facts) != 1 || facts[0].FactType != factTypeRawFallback {
-		t.Fatalf("expected 1 raw fallback fact, got %v", facts)
+	if len(facts) != 0 {
+		t.Fatalf("expected query_intent-only extraction to return no facts, got %v", facts)
 	}
 	if len(messageTags) != 2 {
 		t.Fatalf("expected 2 message_tags entries, got %d", len(messageTags))
@@ -616,6 +1102,387 @@ func TestExtractFactsAndTagsRetryFallbackDropsFlattenedQueryIntent(t *testing.T)
 	}
 	if len(messageTags[1]) != 1 || messageTags[1][0] != "answer" {
 		t.Fatalf("expected message_tags[1] = [answer], got %v", messageTags[1])
+	}
+}
+
+func TestFilterLongTermFactsDropsTransientAndKeepsStableFacts(t *testing.T) {
+	t.Parallel()
+
+	input := []ExtractedFact{
+		{Text: "User wants to restart a task and restore it to normal working condition"},
+		{Text: "Is working out now"},
+		{Text: "Considering consuming protein powder tonight (2026-06-14)."},
+		{Text: "Recorded weight is 79.7kg"},
+		{Text: "Temporary workspace is /home/ec2-user/clawd-workspace/"},
+		{Text: "Ate a plate of Xijia De mushroom and pork dumplings for lunch"},
+		{Text: "User had Starbucks for breakfast"},
+		{Text: "Usually sleeps more than 7 hours"},
+		{Text: "Default protein serving is 24g"},
+		{Text: "Uses Feishu for calendar scheduling"},
+		{Text: "Plans to shift focus from weight reduction to muscle gain, with fat loss as a secondary objective."},
+		{Text: "Melanie went camping in the mountains last week"},
+		{Text: "James plans to call Samantha next month"},
+		{Text: "Alice had dinner with Bob yesterday"},
+		{Text: "Alice is working out now"},
+		{Text: "User wants to create a startup"},
+		{Text: "User wants to set up a nonprofit"},
+		{Text: "Debugging a memory leak in a Go service"},
+	}
+
+	got := filterLongTermFacts(input)
+	var texts []string
+	for _, fact := range got {
+		texts = append(texts, fact.Text)
+	}
+
+	want := []string{
+		"Usually sleeps more than 7 hours",
+		"Default protein serving is 24g",
+		"Uses Feishu for calendar scheduling",
+		"Plans to shift focus from weight reduction to muscle gain, with fat loss as a secondary objective.",
+		"Melanie went camping in the mountains last week",
+		"James plans to call Samantha next month",
+		"Alice had dinner with Bob yesterday",
+		"Alice is working out now",
+		"User wants to create a startup",
+		"User wants to set up a nonprofit",
+		"Debugging a memory leak in a Go service",
+	}
+	if !reflect.DeepEqual(texts, want) {
+		t.Fatalf("filtered texts = %#v, want %#v", texts, want)
+	}
+}
+
+func TestServerGuardDropsOnlyNarrowOperationalIntentAndLogs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "restart task",
+			text: "User wants to restart a task and restore it to normal working condition",
+			want: factTypeEphemeralIntent,
+		},
+		{
+			name: "restart task with stable configuration wording",
+			text: "User wants to restart a task using the default configuration",
+			want: factTypeEphemeralIntent,
+		},
+		{
+			name: "record weight for durable goal",
+			text: "User wants to record a weight for the long-term goal",
+			want: factTypeEphemeralIntent,
+		},
+		{
+			name: "short lived supplement intent mentioning goal",
+			text: "Considering consuming protein powder tonight for the goal",
+			want: factTypeEphemeralIntent,
+		},
+		{
+			name: "third person progressive supplement intent",
+			text: "The user is considering consuming protein powder tonight",
+			want: factTypeEphemeralIntent,
+		},
+		{
+			name: "supplement intent with non-social companion phrase",
+			text: "The user is considering consuming protein powder tonight with water",
+			want: factTypeEphemeralIntent,
+		},
+		{
+			name: "specific having supplement intent",
+			text: "The user is considering having protein powder tonight",
+			want: factTypeEphemeralIntent,
+		},
+		{
+			name: "durable future social plan",
+			text: "User plans to have dinner with Alice tomorrow",
+			want: "",
+		},
+		{
+			name: "durable future family plan",
+			text: "User will eat lunch with family tomorrow",
+			want: "",
+		},
+		{
+			name: "durable visa interview commitment",
+			text: "User will have a visa interview tomorrow",
+			want: "",
+		},
+		{
+			name: "durable surgery commitment",
+			text: "User plans to have surgery tomorrow",
+			want: "",
+		},
+		{
+			name: "durable employee training plan",
+			text: "User plans to train a new employee tomorrow",
+			want: "",
+		},
+		{
+			name: "durable active employee training",
+			text: "User is training a new employee tomorrow",
+			want: "",
+		},
+		{
+			name: "durable future workout commitment",
+			text: "User is working out tomorrow",
+			want: "",
+		},
+		{
+			name: "debug log",
+			text: "The debug log reported a transient import task error",
+			want: factTypeOperationalLog,
+		},
+		{
+			name: "completed import task log",
+			text: "Import task completed successfully",
+			want: factTypeOperationalLog,
+		},
+		{
+			name: "durable cron configuration",
+			text: "Cron job is configured to run daily",
+			want: "",
+		},
+		{
+			name: "durable visa deadline",
+			text: "User's visa application is due tomorrow",
+			want: "",
+		},
+		{
+			name: "durable project deadline",
+			text: "Project proposal is due tomorrow",
+			want: "",
+		},
+		{
+			name: "assistant eta log",
+			text: "Assistant ETA is tomorrow",
+			want: factTypeOperationalLog,
+		},
+		{
+			name: "durable visa confirmation deadline",
+			text: "Visa application requires confirmation today",
+			want: "",
+		},
+		{
+			name: "durable project confirmation deadline",
+			text: "Project proposal requires confirmation today",
+			want: "",
+		},
+		{
+			name: "system confirmation log",
+			text: "System requires confirmation today",
+			want: factTypeOperationalLog,
+		},
+		{
+			name: "durable smoke test implementation",
+			text: "mnemos API smoke test round-2 uses a poll loop to wait for async memory creation",
+			want: "",
+		},
+		{
+			name: "durable social meal event",
+			text: "Had dinner with Alice yesterday",
+			want: "",
+		},
+		{
+			name: "durable possessive relationship meal event",
+			text: "User had dinner with his wife yesterday",
+			want: "",
+		},
+		{
+			name: "durable lowercase name meal event",
+			text: "User had dinner with alice yesterday",
+			want: "",
+		},
+		{
+			name: "explicit weight log with instrument",
+			text: "User recorded weight with a Withings scale",
+			want: factTypeActivityLog,
+		},
+		{
+			name: "explicit sleep log with instrument",
+			text: "User logged sleep with Apple Watch",
+			want: factTypeActivityLog,
+		},
+		{
+			name: "explicit quantified weight log",
+			text: "User weighed 79.7kg",
+			want: factTypeActivityLog,
+		},
+		{
+			name: "durable recorded album",
+			text: "User recorded their first album in 2020",
+			want: "",
+		},
+		{
+			name: "durable logged production incident",
+			text: "User logged the production incident for the postmortem",
+			want: "",
+		},
+		{
+			name: "durable completed sleep study",
+			text: "Completed a sleep study in 2024",
+			want: "",
+		},
+		{
+			name: "durable travel sleep event",
+			text: "User slept in Tokyo yesterday",
+			want: "",
+		},
+		{
+			name: "subjectless sleep duration log",
+			text: "Slept 5 hours last night",
+			want: factTypeActivityLog,
+		},
+		{
+			name: "subjectless sleep quality log",
+			text: "Slept poorly last night",
+			want: factTypeActivityLog,
+		},
+		{
+			name: "durable subjectless travel sleep event",
+			text: "Slept at a Tokyo hotel yesterday",
+			want: "",
+		},
+		{
+			name: "durable historical health event",
+			text: "Lost 20kg after cancer treatment in 2015",
+			want: "",
+		},
+		{
+			name: "durable birth measurement",
+			text: "User's birth weight is 3kg",
+			want: "",
+		},
+		{
+			name: "durable startup goal",
+			text: "User wants to create a startup",
+			want: "",
+		},
+		{
+			name: "durable nonprofit goal",
+			text: "User wants to set up a nonprofit",
+			want: "",
+		},
+		{
+			name: "durable debugging work",
+			text: "Debugging a memory leak in a Go service",
+			want: "",
+		},
+		{
+			name: "durable completed education",
+			text: "Completed a PhD in 2015",
+			want: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serverGuardDropReason(tc.text); got != tc.want {
+				t.Fatalf("serverGuardDropReason(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestServerGuardHandlesChineseNonLongTermContent(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "restart task", text: "用户想重启任务", want: factTypeEphemeralIntent},
+		{name: "consume supplement tonight", text: "用户考虑今晚喝蛋白粉", want: factTypeEphemeralIntent},
+		{name: "current workout", text: "用户正在健身", want: factTypeTransientStatus},
+		{name: "recorded weight", text: "用户记录了体重79.7kg", want: factTypeActivityLog},
+		{name: "temporary workspace", text: "临时工作区是 /tmp/mem9", want: factTypeOperationalLog},
+		{name: "completed import task", text: "导入任务已完成", want: factTypeOperationalLog},
+		{name: "durable company plan", text: "用户计划明年创办一家公司", want: ""},
+		{name: "durable employee training", text: "用户正在训练新员工", want: ""},
+		{name: "durable import configuration", text: "导入任务使用批处理架构", want: ""},
+		{name: "durable social event", text: "昨天和 Alice 一起吃了晚饭", want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serverGuardDropReason(tc.text); got != tc.want {
+				t.Fatalf("serverGuardDropReason(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFilterLongTermFactsDropsNonLongTermFactTypes(t *testing.T) {
+	t.Parallel()
+
+	input := []ExtractedFact{
+		{Text: "keep stable preference", FactType: "fact"},
+		{Text: "query", FactType: factTypeQueryIntent},
+		{Text: "now", FactType: factTypeTransientStatus},
+		{Text: "intent", FactType: factTypeEphemeralIntent},
+		{Text: "activity", FactType: factTypeActivityLog},
+		{Text: "ops", FactType: factTypeOperationalLog},
+	}
+
+	got := filterLongTermFacts(input)
+	if len(got) != 1 || got[0].Text != "keep stable preference" {
+		t.Fatalf("filtered facts = %+v, want only stable fact", got)
+	}
+}
+
+func TestReconcilePhase2FiltersNonLongTermFactsBeforeWrite(t *testing.T) {
+	t.Parallel()
+
+	repo := &memoryRepoMock{}
+	svc := NewIngestService(repo, nil, nil, "auto-model", ModeSmart)
+
+	res, err := svc.ReconcilePhase2(context.Background(), "agent-1", "agent-1", "", "sess-1", []ExtractedFact{
+		{Text: "Is working out now"},
+		{Text: "Temporary workspace is /home/ec2-user/clawd-workspace/"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("ReconcilePhase2() error = %v", err)
+	}
+	if res == nil || res.Status != "complete" || res.MemoriesChanged != 0 {
+		t.Fatalf("result = %+v, want complete with no changes", res)
+	}
+	if len(repo.createCalls) != 0 {
+		t.Fatalf("create calls = %d, want 0", len(repo.createCalls))
+	}
+}
+
+func TestExtractPhase1FiltersFactsButPreservesMessageTags(t *testing.T) {
+	t.Parallel()
+
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": `{"facts":[{"text":"Is working out now","fact_type":"transient_status"}],"message_tags":[["fitness"],["answer"]]}`}},
+			},
+		})
+	}))
+	defer mockLLM.Close()
+
+	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+	svc := NewIngestService(&memoryRepoMock{}, llmClient, nil, "auto-model", ModeSmart)
+
+	result, err := svc.ExtractPhase1(context.Background(), []IngestMessage{
+		{Role: "user", Content: "Is working out now"},
+		{Role: "assistant", Content: "Got it."},
+	})
+	if err != nil {
+		t.Fatalf("ExtractPhase1() error = %v", err)
+	}
+	if len(result.Facts) != 0 {
+		t.Fatalf("facts = %+v, want none", result.Facts)
+	}
+	if len(result.MessageTags) != 2 || len(result.MessageTags[0]) != 1 || result.MessageTags[0][0] != "fitness" {
+		t.Fatalf("message tags = %+v, want preserved tags", result.MessageTags)
 	}
 }
 
@@ -688,9 +1555,10 @@ func TestReconcileAddSetsTagsOnMemory(t *testing.T) {
 	svc := NewIngestService(memRepo, llmClient, nil, "auto-model", ModeSmart)
 
 	_, err := svc.Ingest(context.Background(), "agent-1", IngestRequest{
-		Mode:      ModeSmart,
-		SessionID: "sess-add",
-		AgentID:   "agent-1",
+		Mode:               ModeSmart,
+		SessionID:          "sess-add",
+		AgentID:            "agent-1",
+		ExternalProvenance: &ExternalProvenance{Schema: ExternalProvenanceSchema, SourceMessageID: "message_add"},
 		Messages: []IngestMessage{
 			{Role: "user", Content: "I use Go 1.22"},
 			{Role: "assistant", Content: "Noted."},
@@ -706,6 +1574,7 @@ func TestReconcileAddSetsTagsOnMemory(t *testing.T) {
 	if len(got) != 2 || got[0] != "tech" || got[1] != "work" {
 		t.Fatalf("expected tags [tech work], got %v", got)
 	}
+	requireExternalSourceMessageID(t, memRepo.createCalls[0].Metadata, "message_add")
 }
 
 func TestReconcileUpdateSetsTagsOnMemory(t *testing.T) {
@@ -730,15 +1599,16 @@ func TestReconcileUpdateSetsTagsOnMemory(t *testing.T) {
 	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
 	memRepo := &memoryRepoMock{
 		vectorResults: []domain.Memory{
-			{ID: "mem-startup", Content: "Works at startup X", MemoryType: domain.TypeInsight, State: domain.StateActive},
+			{ID: "mem-startup", Content: "Works at startup X", MemoryType: domain.TypeInsight, State: domain.StateActive, Metadata: json.RawMessage(`{"external_provenance":{"schema":"agent9/message-source@1","source_message_id":"message_old"},"kept":"yes"}`)},
 		},
 	}
 	svc := NewIngestService(memRepo, llmClient, nil, "auto-model", ModeSmart)
 
 	_, err := svc.Ingest(context.Background(), "agent-1", IngestRequest{
-		Mode:      ModeSmart,
-		SessionID: "sess-update",
-		AgentID:   "agent-1",
+		Mode:               ModeSmart,
+		SessionID:          "sess-update",
+		AgentID:            "agent-1",
+		ExternalProvenance: &ExternalProvenance{Schema: ExternalProvenanceSchema, SourceMessageID: "message_update"},
 		Messages: []IngestMessage{
 			{Role: "user", Content: "I now work at company Y"},
 			{Role: "assistant", Content: "Noted."},
@@ -754,6 +1624,8 @@ func TestReconcileUpdateSetsTagsOnMemory(t *testing.T) {
 	if len(got) != 1 || got[0] != "work" {
 		t.Fatalf("expected tags [work], got %v", got)
 	}
+	requireExternalSourceMessageID(t, memRepo.createCalls[0].Metadata, "message_update")
+	requireExternalSourceMessageID(t, memRepo.vectorResults[0].Metadata, "message_old")
 }
 
 func TestReconcileUpdateTagsOmitted(t *testing.T) {
@@ -931,15 +1803,16 @@ func TestReconcilePinnedFallbackCarriesTags(t *testing.T) {
 	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
 	memRepo := &memoryRepoMock{
 		vectorResults: []domain.Memory{
-			{ID: "pinned-1", Content: "Uses Python", MemoryType: domain.TypePinned, State: domain.StateActive},
+			{ID: "pinned-1", Content: "Uses Python", MemoryType: domain.TypePinned, State: domain.StateActive, Metadata: json.RawMessage(`{"external_provenance":{"schema":"agent9/message-source@1","source_message_id":"message_pinned_old"}}`)},
 		},
 	}
 	svc := NewIngestService(memRepo, llmClient, nil, "auto-model", ModeSmart)
 
 	_, err := svc.Ingest(context.Background(), "agent-1", IngestRequest{
-		Mode:      ModeSmart,
-		SessionID: "sess-pinned",
-		AgentID:   "agent-1",
+		Mode:               ModeSmart,
+		SessionID:          "sess-pinned",
+		AgentID:            "agent-1",
+		ExternalProvenance: &ExternalProvenance{Schema: ExternalProvenanceSchema, SourceMessageID: "message_pinned_new"},
 		Messages: []IngestMessage{
 			{Role: "user", Content: "I use Go 1.22"},
 			{Role: "assistant", Content: "Noted."},
@@ -955,9 +1828,11 @@ func TestReconcilePinnedFallbackCarriesTags(t *testing.T) {
 	if len(got) != 1 || got[0] != "tech" {
 		t.Fatalf("expected tags [tech], got %v", got)
 	}
+	requireExternalSourceMessageID(t, memRepo.createCalls[0].Metadata, "message_pinned_new")
+	requireExternalSourceMessageID(t, memRepo.vectorResults[0].Metadata, "message_pinned_old")
 }
 
-func TestReconcileAddPreservesRawFallbackTag(t *testing.T) {
+func TestIngestDoesNotReconcileWhenExtractionReturnsNoFacts(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
@@ -989,15 +1864,11 @@ func TestReconcileAddPreservesRawFallbackTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ingest() error = %v", err)
 	}
-	if callCount != 2 {
-		t.Fatalf("expected 2 LLM calls (extract + reconcile), got %d", callCount)
+	if callCount != 1 {
+		t.Fatalf("expected 1 LLM call for extraction only, got %d", callCount)
 	}
-	if len(memRepo.createCalls) != 1 {
-		t.Fatalf("expected 1 create call, got %d", len(memRepo.createCalls))
-	}
-	got := memRepo.createCalls[0].Tags
-	if len(got) != 2 || got[0] != "tech" || got[1] != rawFallbackTag {
-		t.Fatalf("expected reconcile ADD tags [tech %s], got %v", rawFallbackTag, got)
+	if len(memRepo.createCalls) != 0 {
+		t.Fatalf("expected no create calls when extraction returns no facts, got %d", len(memRepo.createCalls))
 	}
 }
 
@@ -1005,8 +1876,8 @@ func (m *memoryRepoMock) UpdateOptimistic(ctx context.Context, mem *domain.Memor
 	return m.updateOptimisticErr
 }
 
-func (m *memoryRepoMock) SoftDelete(ctx context.Context, id, agentName string) error {
-	return nil
+func (m *memoryRepoMock) SoftDelete(ctx context.Context, id, agentName string) (int64, error) {
+	return 1, nil
 }
 
 func (m *memoryRepoMock) BulkSoftDelete(ctx context.Context, ids []string, agentName string) (int64, error) {
@@ -1041,6 +1912,10 @@ func (m *memoryRepoMock) List(ctx context.Context, f domain.MemoryFilter) ([]dom
 	return nil, 0, nil
 }
 
+func (m *memoryRepoMock) ListAllTypes(ctx context.Context, f domain.MemoryFilter) ([]domain.Memory, int, error) {
+	return m.List(ctx, f)
+}
+
 func (m *memoryRepoMock) Count(ctx context.Context) (int, error) {
 	return 0, nil
 }
@@ -1052,9 +1927,13 @@ func (m *memoryRepoMock) BulkCreate(ctx context.Context, memories []*domain.Memo
 func (m *memoryRepoMock) VectorSearch(ctx context.Context, queryVec []float32, f domain.MemoryFilter, limit int) ([]domain.Memory, error) {
 	m.mu.Lock()
 	m.lastVectorFilter = f
+	hook := m.vectorSearchHook
 	vectorErr := m.vectorErr
 	vectorResults := m.vectorResults
 	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, queryVec, f, limit)
+	}
 	if vectorErr != nil {
 		return nil, vectorErr
 	}
@@ -1131,7 +2010,7 @@ func (m *memoryRepoMock) ListBootstrap(ctx context.Context, limit int) ([]domain
 	return nil, nil
 }
 
-func (m *memoryRepoMock) NearDupSearch(_ context.Context, _ string) (string, float64, error) {
+func (m *memoryRepoMock) NearDupSearch(_ context.Context, _ string, _ domain.MemoryFilter) (string, float64, error) {
 	return "", 0, nil
 }
 
@@ -1220,6 +2099,27 @@ func TestDropQueryIntentFacts(t *testing.T) {
 }
 
 func (m *memoryRepoMock) CountStats(ctx context.Context) (int64, int64, error) { return 0, 0, nil }
+
+func (m *memoryRepoMock) GetEmbeddingsByID(ctx context.Context, ids []string) (map[string][]float32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	copiedIDs := append([]string(nil), ids...)
+	m.embeddingLookupCalls = append(m.embeddingLookupCalls, copiedIDs)
+	if m.embeddingLookupErr != nil {
+		return nil, m.embeddingLookupErr
+	}
+
+	result := make(map[string][]float32, len(ids))
+	for _, id := range ids {
+		embedding := m.embeddingLookup[id]
+		if len(embedding) == 0 {
+			continue
+		}
+		result[id] = append([]float32(nil), embedding...)
+	}
+	return result, nil
+}
 
 func TestStripInjectedContext(t *testing.T) {
 	t.Parallel()
@@ -1459,6 +2359,7 @@ func TestIngestModeRawStoresInsight(t *testing.T) {
 			Role:    "assistant",
 			Content: "world",
 		}},
+		Metadata: json.RawMessage(`{"source":"raw-test","key":"val"}`),
 	}
 
 	res, err := svc.Ingest(context.Background(), "agent-1", req)
@@ -1480,6 +2381,20 @@ func TestIngestModeRawStoresInsight(t *testing.T) {
 	if created.MemoryType != domain.TypeInsight {
 		t.Fatalf("expected memory type insight, got %q", created.MemoryType)
 	}
+
+	if created.Metadata == nil {
+		t.Fatal("ingestRaw should preserve request metadata on created memory")
+	}
+	var meta map[string]string
+	if err := json.Unmarshal(created.Metadata, &meta); err != nil {
+		t.Fatalf("metadata unmarshal error: %v", err)
+	}
+	if meta["source"] != "raw-test" {
+		t.Fatalf("metadata.source = %q, want raw-test", meta["source"])
+	}
+	if meta["key"] != "val" {
+		t.Fatalf("metadata.key = %q, want val", meta["key"])
+	}
 }
 
 func TestIngestNilLLMFallsBackToRaw(t *testing.T) {
@@ -1496,6 +2411,7 @@ func TestIngestNilLLMFallsBackToRaw(t *testing.T) {
 			Role:    "user",
 			Content: "hello",
 		}},
+		Metadata: json.RawMessage(`{"fallback":"nil-llm"}`),
 	}
 
 	res, err := svc.Ingest(context.Background(), "agent-2", req)
@@ -1510,6 +2426,9 @@ func TestIngestNilLLMFallsBackToRaw(t *testing.T) {
 	}
 	if got := memRepo.createCalls[0].Content; got != "User: hello" {
 		t.Fatalf("unexpected content: %q", got)
+	}
+	if memRepo.createCalls[0].Metadata == nil {
+		t.Fatal("nil-LLM raw fallback should preserve request metadata")
 	}
 }
 
@@ -1671,16 +2590,17 @@ func TestReconcileDeleteErrNotFoundIsNotWarning(t *testing.T) {
 	memRepo := &memoryRepoMock{
 		setStateErr: domain.ErrNotFound,
 		vectorResults: []domain.Memory{
-			{ID: "mem-123", Content: "user prefers dark mode", MemoryType: domain.TypeInsight, State: domain.StateActive},
+			{ID: "mem-123", Content: "user prefers dark mode", MemoryType: domain.TypeInsight, State: domain.StateActive, Metadata: json.RawMessage(`{"external_provenance":{"schema":"agent9/message-source@1","source_message_id":"message_delete_old"}}`)},
 		},
 	}
 
 	svc := NewIngestService(memRepo, llmClient, nil, "auto-model", ModeSmart)
 
 	res, err := svc.Ingest(context.Background(), "agent-1", IngestRequest{
-		Mode:      ModeSmart,
-		SessionID: "sess-1",
-		AgentID:   "agent-1",
+		Mode:               ModeSmart,
+		SessionID:          "sess-1",
+		AgentID:            "agent-1",
+		ExternalProvenance: &ExternalProvenance{Schema: ExternalProvenanceSchema, SourceMessageID: "message_delete_new"},
 		Messages: []IngestMessage{
 			{Role: "user", Content: "I prefer dark mode"},
 			{Role: "assistant", Content: "Noted, dark mode preference saved."},
@@ -1708,6 +2628,10 @@ func TestReconcileDeleteErrNotFoundIsNotWarning(t *testing.T) {
 	if memRepo.setStateCalls[0].State != domain.StateDeleted {
 		t.Fatalf("expected StateDeleted, got %q", memRepo.setStateCalls[0].State)
 	}
+	if len(memRepo.createCalls) != 0 {
+		t.Fatalf("DELETE created %d facts, want 0", len(memRepo.createCalls))
+	}
+	requireExternalSourceMessageID(t, memRepo.vectorResults[0].Metadata, "message_delete_old")
 }
 
 // TestReconcileDeleteRealErrorCountsAsWarning verifies that a real database error
@@ -1915,7 +2839,7 @@ func TestGatherExistingMemoriesFiltersLowScoreVectorResults(t *testing.T) {
 
 	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
 
-	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", []string{"test fact"})
+	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{"test fact"})
 	if err != nil {
 		t.Fatalf("gatherExistingMemories() error = %v", err)
 	}
@@ -1946,7 +2870,7 @@ func TestGatherExistingMemoriesFTSOnlyMode(t *testing.T) {
 	// No embedder, no autoModel — FTS-only deployment.
 	svc := NewIngestService(memRepo, nil, nil, "", ModeSmart)
 
-	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", []string{"Go programming", "TiDB database"})
+	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{"Go programming", "TiDB database"})
 	if err != nil {
 		t.Fatalf("gatherExistingMemories() error = %v", err)
 	}
@@ -1985,7 +2909,7 @@ func TestGatherExistingMemoriesHybridDedup(t *testing.T) {
 
 	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
 
-	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", []string{"dark mode preference"})
+	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{"dark mode preference"})
 	if err != nil {
 		t.Fatalf("gatherExistingMemories() error = %v", err)
 	}
@@ -2027,7 +2951,7 @@ func TestGatherExistingMemoriesParallelMergeKeepsFactOrder(t *testing.T) {
 
 	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
 
-	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", []string{"fact-1", "fact-2"})
+	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{"fact-1", "fact-2"})
 	if err != nil {
 		t.Fatalf("gatherExistingMemories() error = %v", err)
 	}
@@ -2079,7 +3003,7 @@ func TestGatherExistingMemoriesSearchesFactsInParallel(t *testing.T) {
 
 	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
 
-	_, err := svc.gatherExistingMemories(context.Background(), "agent-1", []string{
+	_, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{
 		"fact-1",
 		"fact-2",
 		"fact-3",
@@ -2110,7 +3034,7 @@ func TestGatherExistingMemoriesTotalOutageReturnsError(t *testing.T) {
 
 	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
 
-	_, err := svc.gatherExistingMemories(context.Background(), "agent-1", []string{"test fact"})
+	_, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{"test fact"})
 	if err == nil {
 		t.Fatal("expected error on total search outage, got nil")
 	}
@@ -2136,7 +3060,7 @@ func TestGatherExistingMemoriesPartialLegFailureContinues(t *testing.T) {
 
 	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
 
-	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", []string{"test fact"})
+	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{"test fact"})
 	if err != nil {
 		t.Fatalf("expected partial success, got error: %v", err)
 	}
@@ -2145,6 +3069,29 @@ func TestGatherExistingMemoriesPartialLegFailureContinues(t *testing.T) {
 	}
 	if result[0].ID != "vec-1" {
 		t.Fatalf("expected vec-1, got %s", result[0].ID)
+	}
+}
+
+func TestGatherExistingMemoriesFTSTruncationReturnsError(t *testing.T) {
+	t.Parallel()
+
+	highScore := 0.8
+	memRepo := &memoryRepoMock{
+		ftsAvail: true,
+		ftsErr:   domain.ErrFTSSearchTruncated,
+		vectorResults: []domain.Memory{
+			{ID: "vec-1", Content: "from vector", MemoryType: domain.TypeInsight, State: domain.StateActive, Score: &highScore},
+		},
+	}
+
+	svc := NewIngestService(memRepo, nil, nil, "auto-model", ModeSmart)
+
+	result, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{"test fact"})
+	if !errors.Is(err, domain.ErrFTSSearchTruncated) {
+		t.Fatalf("gatherExistingMemories() error = %v, want ErrFTSSearchTruncated", err)
+	}
+	if result != nil {
+		t.Fatalf("result = %+v, want nil", result)
 	}
 }
 
@@ -2162,7 +3109,7 @@ func TestGatherExistingMemoriesFTSOnlyTotalOutage(t *testing.T) {
 	// No embedder, no autoModel — FTS-only deployment.
 	svc := NewIngestService(memRepo, nil, nil, "", ModeSmart)
 
-	_, err := svc.gatherExistingMemories(context.Background(), "agent-1", []string{"test fact"})
+	_, err := svc.gatherExistingMemories(context.Background(), "agent-1", "", []string{"test fact"})
 	if err == nil {
 		t.Fatal("expected error on FTS-only total outage, got nil")
 	}
@@ -2172,7 +3119,7 @@ func TestReconcileContentRequiresLLM(t *testing.T) {
 	t.Parallel()
 
 	svc := NewIngestService(&memoryRepoMock{}, nil, nil, "", ModeSmart)
-	_, err := svc.ReconcileContent(context.Background(), "agent", "agent", "", []string{"prefers dark mode"})
+	_, err := svc.ReconcileContent(context.Background(), "agent", "agent", "", "", []string{"prefers dark mode"})
 	if err == nil {
 		t.Fatal("expected error when llm is nil")
 	}
@@ -2189,7 +3136,7 @@ func TestReconcileContentValidatesInput(t *testing.T) {
 	t.Parallel()
 
 	svc := NewIngestService(&memoryRepoMock{}, nil, nil, "", ModeSmart)
-	_, err := svc.ReconcileContent(context.Background(), "agent", "agent", "", nil)
+	_, err := svc.ReconcileContent(context.Background(), "agent", "agent", "", "", nil)
 	if err == nil {
 		t.Fatal("expected validation error for empty contents")
 	}
@@ -2320,6 +3267,7 @@ func TestReconcileOmitsAgeForZeroTimestamp(t *testing.T) {
 				Content:    "Prefers light mode",
 				MemoryType: domain.TypeInsight,
 				State:      domain.StateActive,
+				Metadata:   json.RawMessage(`{"external_provenance":{"schema":"agent9/message-source@1","source_message_id":"message_noop_old"}}`),
 				// UpdatedAt is zero value
 			},
 		},
@@ -2328,9 +3276,10 @@ func TestReconcileOmitsAgeForZeroTimestamp(t *testing.T) {
 	svc := NewIngestService(memRepo, llmClient, nil, "auto-model", ModeSmart)
 
 	_, err := svc.Ingest(context.Background(), "agent-1", IngestRequest{
-		Mode:      ModeSmart,
-		SessionID: "sess-noage",
-		AgentID:   "agent-1",
+		Mode:               ModeSmart,
+		SessionID:          "sess-noage",
+		AgentID:            "agent-1",
+		ExternalProvenance: &ExternalProvenance{Schema: ExternalProvenanceSchema, SourceMessageID: "message_noop_new"},
 		Messages: []IngestMessage{
 			{Role: "user", Content: "I prefer dark mode"},
 			{Role: "assistant", Content: "Noted."},
@@ -2357,6 +3306,10 @@ func TestReconcileOmitsAgeForZeroTimestamp(t *testing.T) {
 	} else {
 		t.Fatal("could not find 'Current memory contents:' marker in reconciliation body")
 	}
+	if len(memRepo.createCalls) != 0 || len(memRepo.setStateCalls) != 0 {
+		t.Fatalf("NOOP mutated facts: creates=%d states=%d", len(memRepo.createCalls), len(memRepo.setStateCalls))
+	}
+	requireExternalSourceMessageID(t, memRepo.vectorResults[0].Metadata, "message_noop_old")
 }
 
 func TestReconcileAcceptsEmptyChangeList(t *testing.T) {
@@ -2664,7 +3617,7 @@ func TestExtractPhase1FencedLegacyStringArrayFallback(t *testing.T) {
 	}
 }
 
-func TestExtractFactsAlternativeKeyFallsBackToRawFact(t *testing.T) {
+func TestExtractFactsAlternativeKeyReturnsNoFacts(t *testing.T) {
 	t.Parallel()
 
 	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2684,11 +3637,8 @@ func TestExtractFactsAlternativeKeyFallsBackToRawFact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("extractFacts() error = %v", err)
 	}
-	if len(facts) != 1 {
-		t.Fatalf("expected 1 raw fallback fact for alternative-key schema, got %d: %v", len(facts), facts)
-	}
-	if facts[0].FactType != factTypeRawFallback || facts[0].Text != "I use Go 1.22" {
-		t.Fatalf("expected raw fallback fact preserving user text, got %+v", facts[0])
+	if len(facts) != 0 {
+		t.Fatalf("expected alternative-key schema to return no facts, got %d: %v", len(facts), facts)
 	}
 }
 
@@ -2714,11 +3664,11 @@ func TestExtractFactsFlattenedFactNoTextNoTags(t *testing.T) {
 	svc := NewIngestService(&memoryRepoMock{}, llmClient, nil, "auto-model", ModeSmart)
 
 	facts, err := svc.extractFacts(context.Background(), "User: hello\n\nAssistant: ok")
-	if err != nil {
-		t.Fatalf("extractFacts() error = %v", err)
+	if err == nil {
+		t.Fatal("expected extractFacts() error for unrecoverable junk response")
 	}
-	if len(facts) != 1 || facts[0].FactType != factTypeRawFallback || facts[0].Text != "hello" {
-		t.Fatalf("expected raw fallback fact for unrecoverable junk response, got %v", facts)
+	if len(facts) != 0 {
+		t.Fatalf("expected unrecoverable junk response to return no facts, got %v", facts)
 	}
 }
 
@@ -2733,11 +3683,11 @@ func TestExtractFactsFlattenedFactTagsOnly(t *testing.T) {
 	svc := NewIngestService(&memoryRepoMock{}, llmClient, nil, "auto-model", ModeSmart)
 
 	facts, err := svc.extractFacts(context.Background(), "User: hello\n\nAssistant: ok")
-	if err != nil {
-		t.Fatalf("extractFacts() error = %v", err)
+	if err == nil {
+		t.Fatal("expected extractFacts() error when flattened-fact has tags but no text")
 	}
-	if len(facts) != 1 || facts[0].FactType != factTypeRawFallback || facts[0].Text != "hello" {
-		t.Fatalf("expected raw fallback fact when flattened-fact has tags but no text, got %v", facts)
+	if len(facts) != 0 {
+		t.Fatalf("expected flattened-fact with tags but no text to return no facts, got %v", facts)
 	}
 }
 

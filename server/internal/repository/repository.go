@@ -12,12 +12,14 @@ type MemoryRepo interface {
 	Create(ctx context.Context, m *domain.Memory) error
 	GetByID(ctx context.Context, id string) (*domain.Memory, error)
 	UpdateOptimistic(ctx context.Context, m *domain.Memory, expectedVersion int) error
-	SoftDelete(ctx context.Context, id, agentName string) error
+	SoftDelete(ctx context.Context, id, agentName string) (int64, error)
 	BulkSoftDelete(ctx context.Context, ids []string, agentName string) (int64, error)
 	ArchiveMemory(ctx context.Context, id, supersededBy string) error
 	ArchiveAndCreate(ctx context.Context, archiveID, supersededBy string, newMem *domain.Memory) error
 	SetState(ctx context.Context, id string, state domain.MemoryState) error
 	List(ctx context.Context, f domain.MemoryFilter) (memories []domain.Memory, total int, err error)
+	// ListAllTypes includes raw sessions on backends that store them.
+	ListAllTypes(ctx context.Context, f domain.MemoryFilter) (memories []domain.Memory, total int, err error)
 	Count(ctx context.Context) (int, error)
 	BulkCreate(ctx context.Context, memories []*domain.Memory) error
 
@@ -42,7 +44,7 @@ type MemoryRepo interface {
 	// configured, or backend does not support auto-embedding).
 	// Postgres returns ("", 0, nil) — auto-embedding is not supported.
 	// DB9 implements real search when autoModel is configured; returns ("", 0, nil) otherwise.
-	NearDupSearch(ctx context.Context, queryText string) (id string, score float64, err error)
+	NearDupSearch(ctx context.Context, queryText string, f domain.MemoryFilter) (id string, score float64, err error)
 	// CountStats returns the total active memory count and the count created in the last 7 days.
 	CountStats(ctx context.Context) (total int64, last7d int64, err error)
 }
@@ -54,6 +56,30 @@ type TenantRepo interface {
 	GetByName(ctx context.Context, name string) (*domain.Tenant, error)
 	UpdateStatus(ctx context.Context, id string, status domain.TenantStatus) error
 	UpdateSchemaVersion(ctx context.Context, id string, version int) error
+	TouchActivity(ctx context.Context, tenantID string, at time.Time) error
+	UpsertMemoryStats(ctx context.Context, tenantID string, activityAt time.Time, total, last7d int64, observedAt time.Time) error
+	CountActiveTenantsSince(ctx context.Context, since time.Time) (int64, error)
+	SumActiveMemoryStats(ctx context.Context) (total int64, last7d int64, err error)
+}
+
+// SpaceChainRepo manages Space Chain control-plane records.
+type SpaceChainRepo interface {
+	Create(ctx context.Context, chain *domain.SpaceChain, binding *domain.SpaceChainBinding) error
+	GetByID(ctx context.Context, id string) (*domain.SpaceChain, error)
+	GetByKey(ctx context.Context, key string) (*domain.SpaceChain, error)
+	Update(ctx context.Context, chain *domain.SpaceChain) error
+	SoftDelete(ctx context.Context, id, deletedByUserID string) error
+
+	CreateBinding(ctx context.Context, binding *domain.SpaceChainBinding) error
+	ListBindings(ctx context.Context, chainID string) ([]domain.SpaceChainBinding, error)
+	DisableBinding(ctx context.Context, chainID, bindingID, disabledByUserID string) error
+
+	ListNodes(ctx context.Context, chainID string) ([]domain.SpaceChainNode, error)
+	ReplaceNodes(ctx context.Context, chainID string, nodes []domain.SpaceChainNode) error
+	UpdateNodeRoutingPolicy(ctx context.Context, chainID, nodeID string, enabled bool, prompt string, webhookOnly bool) (*domain.SpaceChainNode, error)
+	RemoveNodeByExternalSpaceID(ctx context.Context, externalSpaceID string) error
+
+	KeyStatus(ctx context.Context, key string) (domain.KeyStatus, error)
 }
 
 // UploadTaskRepo manages upload task records in the control plane DB.
@@ -79,7 +105,11 @@ type UTMRepo interface {
 // BulkCreate silently skips MySQL 1146 (table not yet migrated) at DEBUG level.
 type SessionRepo interface {
 	BulkCreate(ctx context.Context, sessions []*domain.Session) error
-	PatchTags(ctx context.Context, sessionID, contentHash string, tags []string) error
+	PatchTags(ctx context.Context, appID, sessionID, contentHash string, tags []string) error
+	GetByID(ctx context.Context, id string) (*domain.Memory, error)
+	List(ctx context.Context, f domain.MemoryFilter) (memories []domain.Memory, total int, err error)
+	SoftDelete(ctx context.Context, id, agentName string) (int64, error)
+	BulkSoftDelete(ctx context.Context, ids []string, agentName string) (int64, error)
 	AutoVectorSearch(ctx context.Context, query string, f domain.MemoryFilter, limit int) ([]domain.Memory, error)
 	VectorSearch(ctx context.Context, queryVec []float32, f domain.MemoryFilter, limit int) ([]domain.Memory, error)
 	FTSSearch(ctx context.Context, query string, f domain.MemoryFilter, limit int) ([]domain.Memory, error)
@@ -88,5 +118,18 @@ type SessionRepo interface {
 	// ListBySessionIDs returns raw session rows for the given session IDs, ordered by
 	// session_id ASC, created_at ASC, seq ASC, id ASC. At most limitPerSession rows are
 	// returned per session_id. Returns ErrNotSupported on non-TiDB backends.
-	ListBySessionIDs(ctx context.Context, sessionIDs []string, limitPerSession int) ([]*domain.Session, error)
+	ListBySessionIDs(ctx context.Context, sessionIDs []string, appID *string, limitPerSession int) ([]*domain.Session, error)
+
+	// Raw-session edit overlay (display-only; never mutates `sessions`).
+	// UpsertSessionEdit creates or updates the single overlay row for
+	// edit.ID (== sessions.id); on update it bumps version and preserves
+	// the first OriginalContent snapshot. GetSessionEdit returns the
+	// active overlay or ErrNotFound. GetSessionEditsByIDs batch-loads
+	// active overlays keyed by id for Session Search rendering.
+	// DeleteSessionEdit removes the overlay (reverts to original).
+	// Returns ErrNotSupported on non-TiDB backends.
+	UpsertSessionEdit(ctx context.Context, edit *domain.SessionEdit) error
+	GetSessionEdit(ctx context.Context, id string) (*domain.SessionEdit, error)
+	GetSessionEditsByIDs(ctx context.Context, ids []string) (map[string]*domain.SessionEdit, error)
+	DeleteSessionEdit(ctx context.Context, id string) (int64, error)
 }

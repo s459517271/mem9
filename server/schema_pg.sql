@@ -26,6 +26,62 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_name ON tenants(name);
 CREATE INDEX IF NOT EXISTS idx_tenant_status ON tenants(status);
 CREATE INDEX IF NOT EXISTS idx_tenant_provider ON tenants(provider);
 
+CREATE TABLE IF NOT EXISTS tenant_activity (
+    tenant_id                  VARCHAR(36) PRIMARY KEY,
+    last_activity_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    active_memory_total        BIGINT      NOT NULL DEFAULT 0,
+    active_memory_7d_total     BIGINT      NOT NULL DEFAULT 0,
+    memory_stats_observed_at   TIMESTAMPTZ NULL,
+    CONSTRAINT fk_tenant_activity FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_activity_last_activity ON tenant_activity(last_activity_at);
+
+CREATE TABLE IF NOT EXISTS space_chains (
+    id                  VARCHAR(36)   PRIMARY KEY,
+    project_id          VARCHAR(255)  NULL,
+    name                VARCHAR(255)  NOT NULL,
+    description         TEXT          NULL,
+    created_by_user_id  VARCHAR(255)  NULL,
+    deleted_at          TIMESTAMPTZ   NULL,
+    deleted_by_user_id  VARCHAR(255)  NULL,
+    created_at          TIMESTAMPTZ   DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ   DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_space_chains_project ON space_chains(project_id);
+CREATE INDEX IF NOT EXISTS idx_space_chains_deleted ON space_chains(deleted_at);
+
+CREATE TABLE IF NOT EXISTS space_chain_bindings (
+    id                  VARCHAR(36)   PRIMARY KEY,
+    chain_id            VARCHAR(36)   NOT NULL REFERENCES space_chains(id),
+    chain_api_key       VARCHAR(255)  NOT NULL UNIQUE,
+    created_by_user_id  VARCHAR(255)  NULL,
+    disabled            BOOLEAN       NOT NULL DEFAULT FALSE,
+    disabled_at         TIMESTAMPTZ   NULL,
+    disabled_by_user_id VARCHAR(255)  NULL,
+    created_at          TIMESTAMPTZ   DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_space_chain_bindings_chain ON space_chain_bindings(chain_id);
+
+CREATE TABLE IF NOT EXISTS space_chain_nodes (
+    id                  VARCHAR(36)   PRIMARY KEY,
+    chain_id            VARCHAR(36)   NOT NULL REFERENCES space_chains(id),
+    tenant_id           VARCHAR(36)   NOT NULL REFERENCES tenants(id),
+    external_space_id   VARCHAR(255)  NULL,
+    display_name        VARCHAR(255)  NULL,
+    position            INT           NOT NULL,
+    routing_policy_enabled BOOLEAN    NOT NULL DEFAULT FALSE,
+    routing_policy_prompt  TEXT       NULL,
+    routing_policy_webhook_only BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at          TIMESTAMPTZ   DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ   DEFAULT NOW(),
+    CONSTRAINT uniq_space_chain_nodes_tenant UNIQUE (chain_id, tenant_id),
+    CONSTRAINT uniq_space_chain_nodes_position UNIQUE (chain_id, position)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_space_chain_nodes_external_space
+    ON space_chain_nodes(chain_id, external_space_id)
+    WHERE external_space_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_space_chain_nodes_external_lookup ON space_chain_nodes(external_space_id);
+
 CREATE TABLE IF NOT EXISTS memories (
     id              VARCHAR(36)     PRIMARY KEY,
     content         TEXT            NOT NULL,
@@ -36,6 +92,7 @@ CREATE TABLE IF NOT EXISTS memories (
     memory_type     VARCHAR(20)     NOT NULL DEFAULT 'pinned',
     agent_id        VARCHAR(100)    NULL,
     session_id      VARCHAR(100)    NULL,
+    app_id          VARCHAR(100)    NOT NULL DEFAULT '',
     state           VARCHAR(20)     NOT NULL DEFAULT 'active',
     version         INT             DEFAULT 1,
     updated_by      VARCHAR(100),
@@ -48,6 +105,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_source ON memories(source);
 CREATE INDEX IF NOT EXISTS idx_memory_state ON memories(state);
 CREATE INDEX IF NOT EXISTS idx_memory_agent ON memories(agent_id);
 CREATE INDEX IF NOT EXISTS idx_memory_session ON memories(session_id);
+CREATE INDEX IF NOT EXISTS idx_memory_app ON memories(app_id);
 CREATE INDEX IF NOT EXISTS idx_memory_updated ON memories(updated_at);
 
 CREATE TABLE IF NOT EXISTS upload_tasks (
@@ -68,6 +126,47 @@ CREATE TABLE IF NOT EXISTS upload_tasks (
 CREATE INDEX IF NOT EXISTS idx_upload_tenant ON upload_tasks(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_upload_poll ON upload_tasks(status, created_at);
 
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+    id                VARCHAR(36)  PRIMARY KEY,
+    scope_type        VARCHAR(20)  NOT NULL,
+    scope_id          VARCHAR(255) NOT NULL,
+    name              VARCHAR(255) NOT NULL,
+    url               TEXT         NOT NULL,
+    enabled           BOOLEAN      NOT NULL DEFAULT TRUE,
+    events_json       JSONB        NOT NULL,
+    secret_ciphertext TEXT         NOT NULL,
+    created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    deleted_at        TIMESTAMPTZ  NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_scope ON webhook_endpoints(scope_type, scope_id, deleted_at);
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+    id           VARCHAR(36)  PRIMARY KEY,
+    scope_type   VARCHAR(20)  NOT NULL,
+    scope_id     VARCHAR(255) NOT NULL,
+    event_type   VARCHAR(100) NOT NULL,
+    payload_json JSONB        NOT NULL,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_scope ON webhook_events(scope_type, scope_id, created_at);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id               VARCHAR(36) PRIMARY KEY,
+    event_id         VARCHAR(36) NOT NULL REFERENCES webhook_events(id),
+    endpoint_id      VARCHAR(36) NOT NULL REFERENCES webhook_endpoints(id),
+    status           VARCHAR(20) NOT NULL DEFAULT 'pending',
+    attempt_count    INT         NOT NULL DEFAULT 0,
+    next_attempt_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_http_status INT         NULL,
+    last_error       TEXT        NULL,
+    delivered_at     TIMESTAMPTZ NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_poll ON webhook_deliveries(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_event ON webhook_deliveries(event_id);
+
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -84,3 +183,15 @@ CREATE TRIGGER trg_memories_updated BEFORE UPDATE ON memories FOR EACH ROW EXECU
 
 DROP TRIGGER IF EXISTS trg_upload_tasks_updated ON upload_tasks;
 CREATE TRIGGER trg_upload_tasks_updated BEFORE UPDATE ON upload_tasks FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS trg_webhook_endpoints_updated ON webhook_endpoints;
+CREATE TRIGGER trg_webhook_endpoints_updated BEFORE UPDATE ON webhook_endpoints FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS trg_webhook_deliveries_updated ON webhook_deliveries;
+CREATE TRIGGER trg_webhook_deliveries_updated BEFORE UPDATE ON webhook_deliveries FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS trg_space_chains_updated ON space_chains;
+CREATE TRIGGER trg_space_chains_updated BEFORE UPDATE ON space_chains FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS trg_space_chain_nodes_updated ON space_chain_nodes;
+CREATE TRIGGER trg_space_chain_nodes_updated BEFORE UPDATE ON space_chain_nodes FOR EACH ROW EXECUTE FUNCTION update_updated_at();

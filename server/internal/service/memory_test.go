@@ -19,6 +19,20 @@ func floatEqual(a, b float64) bool {
 	return math.Abs(a-b) < 1e-9
 }
 
+type bulkCreateCaptureRepo struct {
+	memoryRepoMock
+	bulkCreateCalls [][]domain.Memory
+}
+
+func (m *bulkCreateCaptureRepo) BulkCreate(_ context.Context, memories []*domain.Memory) error {
+	copied := make([]domain.Memory, len(memories))
+	for i, memory := range memories {
+		copied[i] = *memory
+	}
+	m.bulkCreateCalls = append(m.bulkCreateCalls, copied)
+	return nil
+}
+
 func TestApplyTypeWeights(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -375,6 +389,53 @@ func TestSearchFTSOnlyWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestSearchFallsBackToLooseTokensWhenFTSQuestionHasNoRows(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	corpus := []domain.Memory{
+		{ID: "m-old", Content: "Bosn loves Flame", UpdatedAt: now.Add(-time.Minute), MemoryType: domain.TypeInsight, State: domain.StateActive},
+		{ID: "m-new", Content: "Flame loves Bosn", UpdatedAt: now, MemoryType: domain.TypeInsight, State: domain.StateActive},
+	}
+	var keywordQueries []string
+	memRepo := &memoryRepoMock{
+		ftsAvail: true,
+		ftsSearchHook: func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error) {
+			return nil, nil
+		},
+		keywordSearchHook: func(_ context.Context, query string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			keywordQueries = append(keywordQueries, query)
+			query = strings.ToLower(query)
+			var matches []domain.Memory
+			for _, memory := range corpus {
+				if strings.Contains(strings.ToLower(memory.Content), query) {
+					matches = append(matches, memory)
+				}
+			}
+			return matches, nil
+		},
+	}
+	svc := NewMemoryService(memRepo, nil, nil, "", ModeSmart)
+
+	results, total, err := svc.Search(context.Background(), domain.MemoryFilter{
+		Query: "Bosn loves Frame or not?",
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	if total != 2 || len(results) != 2 {
+		t.Fatalf("expected 2 loose-token results, got total=%d results=%d", total, len(results))
+	}
+	if results[0].ID != "m-new" || results[1].ID != "m-old" {
+		t.Fatalf("unexpected loose-token result order: %#v", results)
+	}
+	wantQueries := []string{"Bosn", "loves", "Frame"}
+	if strings.Join(keywordQueries, ",") != strings.Join(wantQueries, ",") {
+		t.Fatalf("keyword fallback queries = %#v, want %#v", keywordQueries, wantQueries)
+	}
+}
+
 // TestSearchEmptyQueryReturnsList verifies that Search() with empty query
 // delegates to List() instead of any search path.
 func TestSearchEmptyQueryReturnsList(t *testing.T) {
@@ -455,13 +516,119 @@ func TestSearchIgnoresSessionAndSourceFilters(t *testing.T) {
 	}
 }
 
+func TestContentKeywordSearchBypassesFTSAndVector(t *testing.T) {
+	t.Parallel()
+
+	memRepo := &memoryRepoMock{
+		ftsAvail: true,
+		kwResults: []domain.Memory{
+			{ID: "kw-1", Content: "mem9小组负责验证", MemoryType: domain.TypeInsight, State: domain.StateActive},
+		},
+		ftsSearchHook: func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error) {
+			t.Fatal("ContentKeywordSearch must not call FTS")
+			return nil, nil
+		},
+	}
+	svc := NewMemoryService(memRepo, nil, nil, "auto-model", ModeSmart)
+
+	results, total, err := svc.ContentKeywordSearch(context.Background(), domain.MemoryFilter{
+		Query:     "mem9小组",
+		Source:    "console",
+		SessionID: "session-1",
+		AgentID:   "agent-1",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ContentKeywordSearch() error: %v", err)
+	}
+	if total != 1 || len(results) != 1 || results[0].ID != "kw-1" {
+		t.Fatalf("unexpected results: total=%d results=%+v", total, results)
+	}
+	if memRepo.lastKeywordFilter.Source != "console" {
+		t.Fatalf("expected Source filter preserved, got %q", memRepo.lastKeywordFilter.Source)
+	}
+	if memRepo.lastKeywordFilter.SessionID != "session-1" {
+		t.Fatalf("expected SessionID filter preserved, got %q", memRepo.lastKeywordFilter.SessionID)
+	}
+	if memRepo.lastAutoVectorFilter.Query != "" || memRepo.lastFTSFilter.Query != "" {
+		t.Fatalf("direct keyword search unexpectedly touched vector/FTS filters: auto=%+v fts=%+v", memRepo.lastAutoVectorFilter, memRepo.lastFTSFilter)
+	}
+}
+
+func TestSecondHopAutoSearchHydratesSeedEmbedding(t *testing.T) {
+	score := 0.99
+	seedScore := 0.8
+	vectorCalls := make(chan []float32, 1)
+	autoVectorCalls := make(chan string, 1)
+
+	memRepo := &memoryRepoMock{
+		embeddingLookup: map[string][]float32{
+			"seed-1": {0.25, 0.5},
+		},
+		vectorSearchHook: func(_ context.Context, queryVec []float32, f domain.MemoryFilter, limit int) ([]domain.Memory, error) {
+			vectorCalls <- append([]float32(nil), queryVec...)
+			if f.AgentID != "agent-1" {
+				t.Errorf("VectorSearch AgentID = %q, want agent-1", f.AgentID)
+			}
+			if limit != 5 {
+				t.Errorf("VectorSearch limit = %d, want 5", limit)
+			}
+			return []domain.Memory{
+				{ID: "neighbor-1", Content: "near seed", Score: &score, MemoryType: domain.TypeInsight, State: domain.StateActive},
+			}, nil
+		},
+		autoVectorSearchHook: func(_ context.Context, queryText string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			autoVectorCalls <- queryText
+			return nil, nil
+		},
+	}
+	svc := NewMemoryService(memRepo, nil, nil, "auto-model", ModeSmart)
+
+	results := svc.secondHopAutoSearch(
+		context.Background(),
+		map[string]domain.Memory{
+			"seed-1": {ID: "seed-1", Content: "seed content", Score: &seedScore, MemoryType: domain.TypeInsight, State: domain.StateActive},
+		},
+		map[string]float64{"seed-1": 1},
+		domain.MemoryFilter{AgentID: "agent-1"},
+		5,
+		1,
+	)
+
+	if len(results) != 1 || results[0].ID != "neighbor-1" {
+		t.Fatalf("unexpected second-hop results: %+v", results)
+	}
+
+	select {
+	case got := <-vectorCalls:
+		if len(got) != 2 || got[0] != 0.25 || got[1] != 0.5 {
+			t.Fatalf("VectorSearch queryVec = %v, want [0.25 0.5]", got)
+		}
+	default:
+		t.Fatal("expected second-hop search to use hydrated seed embedding")
+	}
+
+	select {
+	case queryText := <-autoVectorCalls:
+		t.Fatalf("second-hop unexpectedly fell back to AutoVectorSearch with query %q", queryText)
+	default:
+	}
+
+	memRepo.mu.Lock()
+	lookupCalls := append([][]string(nil), memRepo.embeddingLookupCalls...)
+	memRepo.mu.Unlock()
+	if len(lookupCalls) != 1 || len(lookupCalls[0]) != 1 || lookupCalls[0][0] != "seed-1" {
+		t.Fatalf("embedding lookup calls = %#v, want [[seed-1]]", lookupCalls)
+	}
+}
+
 func TestCreateFallsBackToRawWhenLLMUnavailable(t *testing.T) {
 	t.Parallel()
 
 	repo := &memoryRepoMock{}
 	svc := NewMemoryService(repo, nil, nil, "", ModeSmart)
 
-	mem, _, err := svc.Create(context.Background(), "agent-1", "user prefers dark mode", []string{"prefs"}, json.RawMessage(`{"source":"manual"}`))
+	mem, _, err := svc.Create(context.Background(), "agent-1", "", "user prefers dark mode", []string{"prefs"}, json.RawMessage(`{"source":"manual"}`))
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -476,6 +643,66 @@ func TestCreateFallsBackToRawWhenLLMUnavailable(t *testing.T) {
 	}
 	if mem.MemoryType != domain.TypeInsight {
 		t.Fatalf("expected insight memory type, got %s", mem.MemoryType)
+	}
+}
+
+func TestCreatePinnedUsesBulkCreateSemantics(t *testing.T) {
+	t.Parallel()
+
+	repo := &bulkCreateCaptureRepo{}
+	svc := NewMemoryService(repo, nil, nil, "", ModeSmart)
+
+	mem, written, err := svc.CreatePinned(
+		context.Background(),
+		"agent-1",
+		"",
+		"user prefers pour-over coffee",
+		[]string{"preference", "coffee"},
+		json.RawMessage(`{"source":"manual"}`),
+	)
+	if err != nil {
+		t.Fatalf("CreatePinned() error = %v", err)
+	}
+	if mem == nil {
+		t.Fatal("expected created memory")
+	}
+	if written != 1 {
+		t.Fatalf("expected 1 written memory, got %d", written)
+	}
+	if len(repo.bulkCreateCalls) != 1 {
+		t.Fatalf("expected 1 bulk create call, got %d", len(repo.bulkCreateCalls))
+	}
+
+	created := repo.bulkCreateCalls[0][0]
+	if created.MemoryType != domain.TypePinned {
+		t.Fatalf("expected pinned memory type, got %s", created.MemoryType)
+	}
+	if created.Source != "agent-1" {
+		t.Fatalf("expected source agent-1, got %q", created.Source)
+	}
+	if created.AgentID != "agent-1" {
+		t.Fatalf("expected agent_id agent-1, got %q", created.AgentID)
+	}
+	if created.UpdatedBy != "agent-1" {
+		t.Fatalf("expected updated_by agent-1, got %q", created.UpdatedBy)
+	}
+	if created.State != domain.StateActive {
+		t.Fatalf("expected active state, got %q", created.State)
+	}
+	if created.Content != "user prefers pour-over coffee" {
+		t.Fatalf("expected content preserved, got %q", created.Content)
+	}
+	if len(created.Tags) != 2 || created.Tags[0] != "preference" || created.Tags[1] != "coffee" {
+		t.Fatalf("expected tags preserved, got %v", created.Tags)
+	}
+	if string(created.Metadata) != `{"source":"manual"}` {
+		t.Fatalf("expected metadata preserved, got %s", string(created.Metadata))
+	}
+	if mem.MemoryType != domain.TypePinned {
+		t.Fatalf("expected returned memory type pinned, got %s", mem.MemoryType)
+	}
+	if mem.AgentID != "agent-1" {
+		t.Fatalf("expected returned agent_id agent-1, got %q", mem.AgentID)
 	}
 }
 
@@ -500,7 +727,7 @@ func TestCreateRunsReconcilePipeline(t *testing.T) {
 	repo := &memoryRepoMock{}
 	svc := NewMemoryService(repo, llmClient, nil, "auto-model", ModeSmart)
 
-	mem, _, err := svc.Create(context.Background(), "agent-1", "I use Go 1.22", nil, nil)
+	mem, _, err := svc.Create(context.Background(), "agent-1", "", "I use Go 1.22", nil, nil)
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}

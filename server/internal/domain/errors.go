@@ -10,6 +10,8 @@ var (
 	ErrWriteConflict           = errors.New("write conflict, retry")
 	ErrNotSupported            = errors.New("not supported")
 	ErrAutoVectorSearchSkipped = errors.New("auto vector search skipped")
+	ErrSchemaIncompatible      = errors.New("schema incompatible")
+	ErrFTSSearchTruncated      = errors.New("fts search truncated")
 )
 
 // ValidationError wraps ErrValidation with a field-level message.
@@ -27,4 +29,17 @@ func (e *ValidationError) Error() string {
 
 func (e *ValidationError) Unwrap() error {
 	return ErrValidation
+}
+
+// SchemaCompatibilityError reports a tenant schema/runtime configuration mismatch.
+type SchemaCompatibilityError struct {
+	Message string
+}
+
+func (e *SchemaCompatibilityError) Error() string {
+	return e.Message
+}
+
+func (e *SchemaCompatibilityError) Unwrap() error {
+	return ErrSchemaIncompatible
 }

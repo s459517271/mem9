@@ -5,10 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qiffang/mnemos/server/internal/domain"
 	"github.com/qiffang/mnemos/server/internal/encrypt"
@@ -18,13 +20,22 @@ import (
 	"log/slog"
 )
 
-type handlerTenantRepo struct{}
+type handlerTenantRepo struct {
+	getTenant *domain.Tenant
+	getErr    error
+}
 
 func (r *handlerTenantRepo) Create(ctx context.Context, t *domain.Tenant) error {
 	return nil
 }
 
 func (r *handlerTenantRepo) GetByID(ctx context.Context, id string) (*domain.Tenant, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	if r.getTenant != nil {
+		return r.getTenant, nil
+	}
 	return nil, domain.ErrNotFound
 }
 
@@ -38,6 +49,22 @@ func (r *handlerTenantRepo) UpdateStatus(ctx context.Context, id string, status 
 
 func (r *handlerTenantRepo) UpdateSchemaVersion(ctx context.Context, id string, version int) error {
 	return nil
+}
+
+func (r *handlerTenantRepo) TouchActivity(ctx context.Context, tenantID string, at time.Time) error {
+	return nil
+}
+
+func (r *handlerTenantRepo) UpsertMemoryStats(ctx context.Context, tenantID string, activityAt time.Time, total, last7d int64, observedAt time.Time) error {
+	return nil
+}
+
+func (r *handlerTenantRepo) CountActiveTenantsSince(ctx context.Context, since time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (r *handlerTenantRepo) SumActiveMemoryStats(ctx context.Context) (int64, int64, error) {
+	return 0, 0, nil
 }
 
 type handlerProvisioner struct {
@@ -170,6 +197,133 @@ func TestProvisionMem9s_FiltersUTMParamsAndKeepsResponseShape(t *testing.T) {
 	}
 	if _, exists := utm["foo"]; exists {
 		t.Fatalf("non-utm param leaked into utm map: %#v", utm)
+	}
+}
+
+func TestGetKeyStatus(t *testing.T) {
+	repoErr := errors.New("repo failed")
+
+	tests := []struct {
+		name      string
+		apiKey    string
+		tenant    *domain.Tenant
+		repoErr   error
+		wantCode  int
+		wantField string
+		wantValue string
+	}{
+		{
+			name:      "missing key",
+			wantCode:  http.StatusUnauthorized,
+			wantField: "error",
+			wantValue: "missing or malformed X-API-Key",
+		},
+		{
+			name:      "whitespace key",
+			apiKey:    "   ",
+			wantCode:  http.StatusUnauthorized,
+			wantField: "error",
+			wantValue: "missing or malformed X-API-Key",
+		},
+		{
+			name:      "active key",
+			apiKey:    "key-active",
+			tenant:    &domain.Tenant{Status: domain.TenantActive, ClusterID: "cluster-active"},
+			wantCode:  http.StatusOK,
+			wantField: "status",
+			wantValue: string(domain.KeyStatusActive),
+		},
+		{
+			name:      "inactive key",
+			apiKey:    "key-provisioning",
+			tenant:    &domain.Tenant{Status: domain.TenantProvisioning, ClusterID: "cluster-inactive"},
+			wantCode:  http.StatusOK,
+			wantField: "status",
+			wantValue: string(domain.KeyStatusInactive),
+		},
+		{
+			name:      "missing tenant",
+			apiKey:    "key-missing",
+			wantCode:  http.StatusNotFound,
+			wantField: "error",
+			wantValue: "key not found",
+		},
+		{
+			name:      "repository failure",
+			apiKey:    "key-failure",
+			repoErr:   repoErr,
+			wantCode:  http.StatusInternalServerError,
+			wantField: "error",
+			wantValue: "auth backend unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			logger := slog.New(reqid.NewHandler(slog.NewJSONHandler(&logBuf, nil)))
+			tenantSvc := service.NewTenantService(
+				&handlerTenantRepo{getTenant: tt.tenant, getErr: tt.repoErr},
+				nil,
+				nil,
+				logger,
+				"",
+				0,
+				0,
+				false,
+				encrypt.NewPlainEncryptor(),
+			)
+			srv := NewServer(tenantSvc, nil, "", nil, nil, "", false, service.ModeSmart, "", logger)
+
+			apiKeyMWCalled := false
+			router := srv.Router(
+				func(h http.Handler) http.Handler { return h },
+				func(h http.Handler) http.Handler { return h },
+				func(h http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						apiKeyMWCalled = true
+						respondError(w, http.StatusTeapot, "apiKeyMW called")
+					})
+				},
+				func(h http.Handler) http.Handler { return h },
+			)
+
+			req := httptest.NewRequest(http.MethodGet, "/v1alpha2/status", nil)
+			if tt.apiKey != "" {
+				req.Header.Set("X-API-Key", tt.apiKey)
+			}
+			rr := httptest.NewRecorder()
+
+			router.ServeHTTP(rr, req)
+
+			if apiKeyMWCalled {
+				t.Fatal("apiKeyMW must not run for /v1alpha2/status")
+			}
+			if rr.Code != tt.wantCode {
+				t.Fatalf("status = %d, body = %s, want %d", rr.Code, rr.Body.String(), tt.wantCode)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body[tt.wantField] != tt.wantValue {
+				t.Fatalf("response %s = %q, want %q; body = %#v", tt.wantField, body[tt.wantField], tt.wantValue, body)
+			}
+			if tt.wantCode == http.StatusOK {
+				for _, field := range []string{
+					`"msg":"api key status resolved"`,
+					`"cluster_id":"` + tt.tenant.ClusterID + `"`,
+					`"api_key_status":"` + tt.wantValue + `"`,
+				} {
+					if !strings.Contains(logBuf.String(), field) {
+						t.Fatalf("status resolution log missing %s: %s", field, logBuf.String())
+					}
+				}
+			}
+			if strings.Contains(logBuf.String(), tt.apiKey) && tt.apiKey != "" {
+				t.Fatalf("logs leaked API key: %s", logBuf.String())
+			}
+		})
 	}
 }
 

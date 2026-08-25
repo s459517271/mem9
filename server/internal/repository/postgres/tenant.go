@@ -70,6 +70,80 @@ func (r *TenantRepoImpl) UpdateSchemaVersion(ctx context.Context, id string, ver
 	return nil
 }
 
+func (r *TenantRepoImpl) TouchActivity(ctx context.Context, tenantID string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO tenant_activity (tenant_id, last_activity_at)
+		 VALUES ($1, $2)
+		 ON CONFLICT (tenant_id) DO UPDATE SET
+		   last_activity_at = GREATEST(tenant_activity.last_activity_at, EXCLUDED.last_activity_at)`,
+		tenantID, at,
+	)
+	if err != nil {
+		return fmt.Errorf("touch tenant activity: %w", err)
+	}
+	return nil
+}
+
+func (r *TenantRepoImpl) UpsertMemoryStats(ctx context.Context, tenantID string, activityAt time.Time, total, last7d int64, observedAt time.Time) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO tenant_activity (tenant_id, last_activity_at, active_memory_total, active_memory_7d_total, memory_stats_observed_at)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (tenant_id) DO UPDATE SET
+		   last_activity_at = GREATEST(tenant_activity.last_activity_at, EXCLUDED.last_activity_at),
+		   active_memory_total = CASE
+		     WHEN tenant_activity.memory_stats_observed_at IS NULL OR EXCLUDED.memory_stats_observed_at >= tenant_activity.memory_stats_observed_at THEN EXCLUDED.active_memory_total
+		     ELSE tenant_activity.active_memory_total
+		   END,
+		   active_memory_7d_total = CASE
+		     WHEN tenant_activity.memory_stats_observed_at IS NULL OR EXCLUDED.memory_stats_observed_at >= tenant_activity.memory_stats_observed_at THEN EXCLUDED.active_memory_7d_total
+		     ELSE tenant_activity.active_memory_7d_total
+		   END,
+		   memory_stats_observed_at = CASE
+		     WHEN tenant_activity.memory_stats_observed_at IS NULL OR EXCLUDED.memory_stats_observed_at >= tenant_activity.memory_stats_observed_at THEN EXCLUDED.memory_stats_observed_at
+		     ELSE tenant_activity.memory_stats_observed_at
+		   END`,
+		tenantID, activityAt, total, last7d, observedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert tenant memory stats: %w", err)
+	}
+	return nil
+}
+
+func (r *TenantRepoImpl) CountActiveTenantsSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	// INNER JOIN deliberately skips orphan activity rows.
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*)
+		 FROM tenant_activity AS ta
+		 INNER JOIN tenants AS t ON t.id = ta.tenant_id
+		 WHERE t.status = 'active'
+		   AND t.deleted_at IS NULL
+		   AND ta.last_activity_at >= $1`,
+		since,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count active tenants since: %w", err)
+	}
+	return count, nil
+}
+
+func (r *TenantRepoImpl) SumActiveMemoryStats(ctx context.Context) (total int64, last7d int64, err error) {
+	err = r.db.QueryRowContext(ctx,
+		`SELECT
+		   COALESCE(SUM(ta.active_memory_total), 0),
+		   COALESCE(SUM(ta.active_memory_7d_total), 0)
+		 FROM tenant_activity AS ta
+		 INNER JOIN tenants AS t ON t.id = ta.tenant_id
+		 WHERE t.status = 'active'
+		   AND t.deleted_at IS NULL`,
+	).Scan(&total, &last7d)
+	if err != nil {
+		return 0, 0, fmt.Errorf("sum active memory stats: %w", err)
+	}
+	return total, last7d, nil
+}
+
 func scanTenant(row *sql.Row) (*domain.Tenant, error) {
 	var t domain.Tenant
 	var clusterID, claimURL sql.NullString

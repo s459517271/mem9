@@ -1,0 +1,538 @@
+---
+import type { SiteBillingPageCopy, SiteBillingTier } from '../content/site';
+import PageMarkdownAction from './PageMarkdownAction.astro';
+
+interface Props {
+  billing: SiteBillingPageCopy;
+}
+
+const { billing } = Astro.props;
+
+const signinHref = `/console/signin?return_to=${encodeURIComponent('/console/')}`;
+
+function getPlanHref(tier: SiteBillingTier): string {
+  const interval = tier.interval ?? 'month';
+  const params = new URLSearchParams({
+    plan: tier.planSku ?? 'starter',
+    interval,
+    after_space_setup: 'stay',
+  });
+  return `/console/billing/plan?${params.toString()}`;
+}
+---
+
+<section id="billing" class="billing-section">
+  <div class="container billing-stack" data-markdown-root>
+    <div class="section-head">
+      <p class="section-kicker" data-i18n="billing.kicker">{billing.kicker}</p>
+      <h2 class="section-title" data-i18n="billing.title">{billing.title}</h2>
+      <p class="section-desc" data-i18n="billing.description">
+        {billing.description}
+      </p>
+      {billing.docsLinkLabel && (
+        <a href="/console-docs#pricing" class="pricing-docs-link" data-i18n="billing.docsLinkLabel">
+          {billing.docsLinkLabel}
+        </a>
+      )}
+      <PageMarkdownAction />
+    </div>
+
+    <div class="pricing-table-wrap surface-card">
+      <table class="pricing-table">
+        <thead>
+          <tr>
+            <th scope="col" class="feature-heading"></th>
+            {billing.tiers.map((tier, index) => (
+              <th
+                scope="col"
+                class:list={['tier-heading', tier.highlighted && 'is-highlighted']}
+              >
+                <div class="card-header">
+                  <h3 class="tier-name" data-i18n={`billing.tiers.${index}.name`}>{tier.name}</h3>
+                  <div class="tier-price-row">
+                    <span
+                      class:list={['tier-price', tier.promoPrice && 'is-crossed']}
+                      data-i18n={`billing.tiers.${index}.price`}
+                    >
+                      {tier.price}
+                    </span>
+                    {tier.promoPrice && (
+                      <span class="tier-price tier-price-promo" data-i18n={`billing.tiers.${index}.promoPrice`}>
+                        {tier.promoPrice}
+                      </span>
+                    )}
+                    {tier.period && (
+                      <span class="tier-period" data-i18n={`billing.tiers.${index}.period`}>{tier.period}</span>
+                    )}
+                  </div>
+                  {tier.ctaAction === 'plan' ? (
+                    <a
+                      href={getPlanHref(tier)}
+                      class="cta-button"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-billing-track
+                      data-tier={tier.name}
+                      data-i18n={`billing.tiers.${index}.ctaLabel`}
+                    >
+                      {tier.ctaLabel}
+                    </a>
+                  ) : tier.ctaAction === 'signin' ? (
+                    <a
+                      href={signinHref}
+                      class="cta-button"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-billing-track
+                      data-tier={tier.name}
+                      data-i18n={`billing.tiers.${index}.ctaLabel`}
+                    >
+                      {tier.ctaLabel}
+                    </a>
+                  ) : tier.ctaAction === 'mailto' ? (
+                    <button
+                      type="button"
+                      data-markdown-include
+                      class="cta-button"
+                      data-contact-modal-trigger
+                      data-billing-track
+                      data-tier={tier.name}
+                      data-i18n={`billing.tiers.${index}.ctaLabel`}
+                    >
+                      {tier.ctaLabel}
+                    </button>
+                  ) : (
+                    null
+                  )}
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {billing.featureLabels.map((label, featureIndex) => (
+            <tr>
+              <th scope="row" class="feature-label" data-i18n={`billing.featureLabels.${featureIndex}`}>
+                {label}
+              </th>
+              {billing.tiers.map((tier, tierIndex) => (
+                <td class:list={[tier.highlighted && 'is-highlighted']}>
+                  <span data-i18n={`billing.tiers.${tierIndex}.features.${featureIndex}`}>
+                    {tier.features[featureIndex]}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pricing-mobile-list" data-markdown-exclude>
+      {billing.tiers.map((tier, tierIndex) => (
+        <article class:list={['pricing-mobile-tier', 'surface-card', tier.highlighted && 'is-highlighted']}>
+          <div class="mobile-tier-header">
+            <h3 class="tier-name" data-i18n={`billing.tiers.${tierIndex}.name`}>{tier.name}</h3>
+            <div class="tier-price-row">
+              <span
+                class:list={['tier-price', tier.promoPrice && 'is-crossed']}
+                data-i18n={`billing.tiers.${tierIndex}.price`}
+              >
+                {tier.price}
+              </span>
+              {tier.promoPrice && (
+                <span class="tier-price tier-price-promo" data-i18n={`billing.tiers.${tierIndex}.promoPrice`}>
+                  {tier.promoPrice}
+                </span>
+              )}
+              {tier.period && (
+                <span class="tier-period" data-i18n={`billing.tiers.${tierIndex}.period`}>{tier.period}</span>
+              )}
+            </div>
+            {tier.ctaAction === 'plan' ? (
+              <a
+                href={getPlanHref(tier)}
+                class="cta-button"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-billing-track
+                data-tier={tier.name}
+                data-i18n={`billing.tiers.${tierIndex}.ctaLabel`}
+              >
+                {tier.ctaLabel}
+              </a>
+            ) : tier.ctaAction === 'signin' ? (
+              <a
+                href={signinHref}
+                class="cta-button"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-billing-track
+                data-tier={tier.name}
+                data-i18n={`billing.tiers.${tierIndex}.ctaLabel`}
+              >
+                {tier.ctaLabel}
+              </a>
+            ) : tier.ctaAction === 'mailto' ? (
+              <button
+                type="button"
+                data-markdown-include
+                class="cta-button"
+                data-contact-modal-trigger
+                data-billing-track
+                data-tier={tier.name}
+                data-i18n={`billing.tiers.${tierIndex}.ctaLabel`}
+              >
+                {tier.ctaLabel}
+              </button>
+            ) : (
+              null
+            )}
+          </div>
+
+          <dl class="mobile-feature-list">
+            {billing.featureLabels.map((label, featureIndex) => (
+              <div class="mobile-feature-row">
+                <dt class="feature-label" data-i18n={`billing.featureLabels.${featureIndex}`}>
+                  {label}
+                </dt>
+                <dd class="mobile-feature-value" data-i18n={`billing.tiers.${tierIndex}.features.${featureIndex}`}>
+                  {tier.features[featureIndex]}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<script is:inline>
+  (function () {
+    function trackCta(tier, label) {
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', 'billing_cta_click', {
+          tier_name: tier,
+          cta_label: label,
+          transport_type: 'beacon',
+        });
+      }
+    }
+
+    document.querySelectorAll('[data-billing-track]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        trackCta(el.dataset.tier || '', el.textContent ? el.textContent.trim() : '');
+      });
+    });
+  })();
+</script>
+
+<style>
+  .billing-section {
+    padding-top: 5rem;
+    padding-bottom: 5rem;
+  }
+
+  .billing-stack {
+    display: grid;
+    gap: 2.5rem;
+  }
+
+  .section-head {
+    width: min(100%, var(--content-rail));
+    margin: 0;
+    text-align: left;
+  }
+
+  .section-head .section-desc {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .pricing-docs-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 1rem;
+    color: var(--text);
+    font-weight: 700;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--text) 45%, transparent);
+    text-underline-offset: 0.18em;
+  }
+
+  .pricing-docs-link::after {
+    content: "->";
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--accent);
+  }
+
+  .pricing-docs-link:hover {
+    color: var(--accent);
+    opacity: 1;
+    text-decoration-color: currentColor;
+  }
+
+  .pricing-table-wrap {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: auto;
+  }
+
+  .pricing-table {
+    width: 100%;
+    min-width: 920px;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .pricing-mobile-list {
+    display: none;
+  }
+
+  .card-header {
+    display: grid;
+    gap: 1rem;
+    min-height: 11.5rem;
+    padding: 1.5rem 1rem 1.25rem;
+    align-content: start;
+    text-align: left;
+  }
+
+  .feature-heading {
+    width: 19%;
+  }
+
+  .tier-heading,
+  .feature-label,
+  .pricing-table td {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tier-heading {
+    vertical-align: top;
+    font-weight: inherit;
+  }
+
+  .tier-heading.is-highlighted,
+  .pricing-table td.is-highlighted {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+
+  .tier-heading.is-highlighted {
+    box-shadow: inset 0 2px 0 var(--accent);
+  }
+
+  .tier-name {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  .tier-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.15rem;
+  }
+
+  .tier-price {
+    font-family: var(--font-display);
+    font-size: 2.25rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    line-height: 1;
+    color: var(--text);
+  }
+
+  .tier-price.is-crossed {
+    color: var(--text-dim);
+    font-size: 2rem;
+    text-decoration: line-through;
+    text-decoration-thickness: 0.12em;
+    text-decoration-color: color-mix(in srgb, var(--text) 70%, transparent);
+  }
+
+  .tier-price-promo {
+    margin-left: 0.35rem;
+  }
+
+  .tier-period {
+    font-size: 0.95rem;
+    color: var(--text-dim);
+  }
+
+  .feature-label,
+  .pricing-table td {
+    padding: 1rem;
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  .feature-label {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text);
+    background: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  }
+
+  .pricing-table td {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--text);
+    line-height: 1.45;
+  }
+
+  .cta-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 3rem;
+    padding: 0.8rem 1rem;
+    border-radius: 0.85rem;
+    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    background: linear-gradient(
+      135deg,
+      var(--text) 0%,
+      color-mix(in srgb, var(--text) 74%, var(--accent)) 100%
+    );
+    color: var(--bg-deep);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 22%, transparent),
+      0 10px 24px color-mix(in srgb, var(--text) 12%, transparent);
+    font-family: var(--font-display);
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease,
+      opacity 0.2s ease,
+      border-color 0.2s ease;
+  }
+
+  .cta-button:hover {
+    transform: translateY(-1px) scale(1.01);
+    opacity: 0.97;
+    border-color: color-mix(in srgb, var(--text) 26%, transparent);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 24%, transparent),
+      0 14px 32px color-mix(in srgb, var(--text) 16%, transparent);
+  }
+
+  @media (max-width: 960px) {
+    .pricing-table-wrap {
+      width: calc(100% + 1rem);
+      margin-left: -0.5rem;
+      border-radius: 0.8rem;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .billing-section {
+      padding-top: 4rem;
+      padding-bottom: 4rem;
+    }
+
+    .pricing-table-wrap {
+      display: none;
+    }
+
+    .pricing-mobile-list {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .pricing-mobile-tier {
+      display: grid;
+      gap: 1.1rem;
+      overflow: hidden;
+      border-radius: 0.7rem;
+    }
+
+    .pricing-mobile-tier.is-highlighted {
+      border-color: var(--border-strong);
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%),
+        linear-gradient(180deg, var(--surface-gradient-start), var(--surface-gradient-end));
+      box-shadow:
+        inset 0 2px 0 var(--accent),
+        var(--surface-inset),
+        var(--surface-shadow);
+    }
+
+    .mobile-tier-header {
+      display: grid;
+      gap: 0.9rem;
+      padding: 1.15rem 1rem 0;
+    }
+
+    .pricing-mobile-tier .tier-price-row {
+      flex-wrap: wrap;
+      row-gap: 0.25rem;
+    }
+
+    .pricing-mobile-tier .cta-button {
+      width: 100%;
+      max-width: none;
+    }
+
+    .tier-price {
+      font-size: 2rem;
+    }
+
+    .tier-price.is-crossed {
+      font-size: 1.75rem;
+    }
+
+    .mobile-feature-list {
+      display: grid;
+      margin: 0;
+    }
+
+    .mobile-feature-row {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 0.8rem;
+      align-items: start;
+      padding: 0.95rem 1rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .pricing-mobile-tier .feature-label {
+      padding: 0;
+      border-bottom: 0;
+      background: transparent;
+      font-size: 0.72rem;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .mobile-feature-value {
+      margin: 0;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.88rem;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .mobile-feature-row {
+      grid-template-columns: 1fr;
+      gap: 0.35rem;
+    }
+  }
+</style>

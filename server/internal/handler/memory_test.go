@@ -3,39 +3,80 @@ package handler
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/qiffang/mnemos/server/internal/domain"
 	"github.com/qiffang/mnemos/server/internal/llm"
+	"github.com/qiffang/mnemos/server/internal/metering"
+	"github.com/qiffang/mnemos/server/internal/metrics"
 	"github.com/qiffang/mnemos/server/internal/middleware"
+	"github.com/qiffang/mnemos/server/internal/runtimeusage"
 	"github.com/qiffang/mnemos/server/internal/service"
+	"github.com/qiffang/mnemos/server/internal/webhook"
 )
 
 // testMemoryRepo is a minimal MemoryRepo mock for handler tests.
 type testMemoryRepo struct {
-	createCalls          []*domain.Memory
-	keywordSearchResults []domain.Memory
-	keywordSearchHook    func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error)
-	lastKeywordFilter    domain.MemoryFilter
-	bulkSoftDeleteCalls  [][]string
-	bulkSoftDeleteResult int64
+	mu                    sync.Mutex
+	createCalls           []*domain.Memory
+	bulkCreateCalls       int
+	bulkCreateHook        func(context.Context)
+	updateCalls           []*domain.Memory
+	vectorSearchResults   []domain.Memory
+	searchCalls           int
+	keywordSearchResults  []domain.Memory
+	keywordSearchHook     func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error)
+	lastKeywordQuery      string
+	lastKeywordFilter     domain.MemoryFilter
+	lastKeywordLimit      int
+	listResults           []domain.Memory
+	listTotal             int
+	listErr               error
+	lastListFilter        domain.MemoryFilter
+	listCalls             int
+	allTypeListResults    []domain.Memory
+	allTypeListTotal      int
+	allTypeListErr        error
+	lastAllTypeListFilter domain.MemoryFilter
+	allTypeListCalls      int
+	softDeleteCalls       []string
+	softDeleteResult      int64
+	softDeleteErr         error
+	bulkSoftDeleteCalls   [][]string
+	bulkSoftDeleteResult  int64
+	countStatsTotal       int64
+	countStatsLast7d      int64
+	countStatsErr         error
+	countStatsCalls       int
 }
 
 func (m *testMemoryRepo) Create(_ context.Context, mem *domain.Memory) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.createCalls = append(m.createCalls, mem)
 	return nil
 }
 
 func (m *testMemoryRepo) GetByID(_ context.Context, id string) (*domain.Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, mem := range m.createCalls {
 		if mem.ID == id {
 			cp := *mem
@@ -44,40 +85,115 @@ func (m *testMemoryRepo) GetByID(_ context.Context, id string) (*domain.Memory, 
 	}
 	return nil, domain.ErrNotFound
 }
-func (m *testMemoryRepo) UpdateOptimistic(context.Context, *domain.Memory, int) error { return nil }
-func (m *testMemoryRepo) SoftDelete(context.Context, string, string) error            { return nil }
+func (m *testMemoryRepo) UpdateOptimistic(_ context.Context, mem *domain.Memory, _ int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateCalls = append(m.updateCalls, mem)
+	for i := range m.createCalls {
+		if m.createCalls[i].ID == mem.ID {
+			cp := *mem
+			cp.Version++
+			m.createCalls[i] = &cp
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
+func (m *testMemoryRepo) SoftDelete(_ context.Context, id string, _ string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.softDeleteCalls = append(m.softDeleteCalls, id)
+	if m.softDeleteErr != nil {
+		return 0, m.softDeleteErr
+	}
+	if m.softDeleteResult != 0 {
+		return m.softDeleteResult, nil
+	}
+	return 1, nil
+}
 func (m *testMemoryRepo) BulkSoftDelete(_ context.Context, ids []string, _ string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.bulkSoftDeleteCalls = append(m.bulkSoftDeleteCalls, append([]string(nil), ids...))
 	return m.bulkSoftDeleteResult, nil
 }
 func (m *testMemoryRepo) ArchiveMemory(context.Context, string, string) error { return nil }
 func (m *testMemoryRepo) ArchiveAndCreate(_ context.Context, _, _ string, mem *domain.Memory) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.createCalls = append(m.createCalls, mem)
 	return nil
 }
 func (m *testMemoryRepo) SetState(context.Context, string, domain.MemoryState) error { return nil }
-func (m *testMemoryRepo) List(context.Context, domain.MemoryFilter) ([]domain.Memory, int, error) {
-	return nil, 0, nil
+func (m *testMemoryRepo) List(_ context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listCalls++
+	m.lastListFilter = filter
+	if m.listErr != nil {
+		return nil, 0, m.listErr
+	}
+	return append([]domain.Memory(nil), m.listResults...), m.listTotal, nil
 }
-func (m *testMemoryRepo) Count(context.Context) (int, error)                 { return 0, nil }
-func (m *testMemoryRepo) BulkCreate(context.Context, []*domain.Memory) error { return nil }
+func (m *testMemoryRepo) ListAllTypes(_ context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.allTypeListCalls++
+	m.lastAllTypeListFilter = filter
+	if m.allTypeListErr != nil {
+		return nil, 0, m.allTypeListErr
+	}
+	if m.allTypeListResults != nil {
+		return append([]domain.Memory(nil), m.allTypeListResults...), m.allTypeListTotal, nil
+	}
+	if m.listErr != nil {
+		return nil, 0, m.listErr
+	}
+	return append([]domain.Memory(nil), m.listResults...), m.listTotal, nil
+}
+func (m *testMemoryRepo) Count(context.Context) (int, error) { return 0, nil }
+func (m *testMemoryRepo) BulkCreate(ctx context.Context, _ []*domain.Memory) error {
+	m.mu.Lock()
+	m.bulkCreateCalls++
+	hook := m.bulkCreateHook
+	m.mu.Unlock()
+	if hook != nil {
+		hook(ctx)
+	}
+	return nil
+}
 func (m *testMemoryRepo) VectorSearch(context.Context, []float32, domain.MemoryFilter, int) ([]domain.Memory, error) {
-	return nil, nil
+	m.mu.Lock()
+	m.searchCalls++
+	m.mu.Unlock()
+	return append([]domain.Memory(nil), m.vectorSearchResults...), nil
 }
 
 func (m *testMemoryRepo) AutoVectorSearch(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error) {
-	return nil, nil
+	m.mu.Lock()
+	m.searchCalls++
+	m.mu.Unlock()
+	return append([]domain.Memory(nil), m.vectorSearchResults...), nil
 }
 
 func (m *testMemoryRepo) KeywordSearch(ctx context.Context, query string, filter domain.MemoryFilter, limit int) ([]domain.Memory, error) {
+	m.mu.Lock()
+	m.lastKeywordQuery = query
 	m.lastKeywordFilter = filter
-	if m.keywordSearchHook != nil {
-		return m.keywordSearchHook(ctx, query, filter, limit)
+	m.lastKeywordLimit = limit
+	hook := m.keywordSearchHook
+	results := append([]domain.Memory(nil), m.keywordSearchResults...)
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, query, filter, limit)
 	}
-	return append([]domain.Memory(nil), m.keywordSearchResults...), nil
+	return results, nil
 }
 
 func (m *testMemoryRepo) FTSSearch(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error) {
+	m.mu.Lock()
+	m.searchCalls++
+	m.mu.Unlock()
 	return nil, nil
 }
 func (m *testMemoryRepo) FTSAvailable() bool { return false }
@@ -85,16 +201,23 @@ func (m *testMemoryRepo) ListBootstrap(context.Context, int) ([]domain.Memory, e
 	return nil, nil
 }
 
-func (m *testMemoryRepo) NearDupSearch(context.Context, string) (string, float64, error) {
+func (m *testMemoryRepo) NearDupSearch(context.Context, string, domain.MemoryFilter) (string, float64, error) {
 	return "", 0, nil
 }
 
-func (m *testMemoryRepo) CountStats(context.Context) (int64, int64, error) { return 0, 0, nil }
+func (m *testMemoryRepo) CountStats(context.Context) (int64, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.countStatsCalls++
+	return m.countStatsTotal, m.countStatsLast7d, m.countStatsErr
+}
 
 // testSessionRepo is a minimal SessionRepo mock for handler tests.
 type testSessionRepo struct {
+	mu                   sync.Mutex
 	bulkCreateCalled     bool
 	patchTagsCalled      bool
+	patchedAppID         string
 	patchedHash          string
 	patchedSessionID     string
 	patchedTags          []string
@@ -102,20 +225,81 @@ type testSessionRepo struct {
 	keywordSearchResults []domain.Memory
 	keywordSearchHook    func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error)
 	lastKeywordFilter    domain.MemoryFilter
+	sessionListResults   []*domain.Session
+	lastSessionAppID     *string
+	lastSessionIDs       []string
+	lastSessionLimit     int
+	getResult            *domain.Memory
+	getErr               error
+	listResults          []domain.Memory
+	listTotal            int
+	lastListFilter       domain.MemoryFilter
+	listCalls            int
+	softDeleteCalls      []string
+	softDeleteErr        error
+	bulkSoftDeleteCalls  [][]string
+	bulkSoftDeleteResult int64
+	overlays             map[string]*domain.SessionEdit
 }
 
 func (s *testSessionRepo) BulkCreate(_ context.Context, sessions []*domain.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.bulkCreateCalled = true
 	s.sessions = sessions
 	return nil
 }
 
-func (s *testSessionRepo) PatchTags(_ context.Context, sessionID, hash string, tags []string) error {
+func (s *testSessionRepo) PatchTags(_ context.Context, appID, sessionID, hash string, tags []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.patchTagsCalled = true
+	s.patchedAppID = appID
 	s.patchedSessionID = sessionID
 	s.patchedHash = hash
 	s.patchedTags = append([]string(nil), tags...)
 	return nil
+}
+
+func (s *testSessionRepo) GetByID(_ context.Context, id string) (*domain.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.getResult != nil && s.getResult.ID == id {
+		cp := *s.getResult
+		return &cp, nil
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (s *testSessionRepo) List(_ context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listCalls++
+	s.lastListFilter = filter
+	return append([]domain.Memory(nil), s.listResults...), s.listTotal, nil
+}
+
+func (s *testSessionRepo) SoftDelete(_ context.Context, id, _ string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.softDeleteCalls = append(s.softDeleteCalls, id)
+	if s.softDeleteErr != nil {
+		return 0, s.softDeleteErr
+	}
+	return 1, nil
+}
+
+func (s *testSessionRepo) BulkSoftDelete(_ context.Context, ids []string, _ string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bulkSoftDeleteCalls = append(s.bulkSoftDeleteCalls, append([]string(nil), ids...))
+	if s.bulkSoftDeleteResult != 0 {
+		return s.bulkSoftDeleteResult, nil
+	}
+	return 0, nil
 }
 
 func (s *testSessionRepo) AutoVectorSearch(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error) {
@@ -131,19 +315,451 @@ func (s *testSessionRepo) FTSSearch(context.Context, string, domain.MemoryFilter
 }
 
 func (s *testSessionRepo) KeywordSearch(ctx context.Context, query string, filter domain.MemoryFilter, limit int) ([]domain.Memory, error) {
+	s.mu.Lock()
 	s.lastKeywordFilter = filter
-	if s.keywordSearchHook != nil {
-		return s.keywordSearchHook(ctx, query, filter, limit)
+	hook := s.keywordSearchHook
+	results := append([]domain.Memory(nil), s.keywordSearchResults...)
+	s.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, query, filter, limit)
 	}
-	return append([]domain.Memory(nil), s.keywordSearchResults...), nil
+	return results, nil
 }
 func (s *testSessionRepo) FTSAvailable() bool { return false }
-func (s *testSessionRepo) ListBySessionIDs(context.Context, []string, int) ([]*domain.Session, error) {
-	return nil, nil
+func (s *testSessionRepo) ListBySessionIDs(_ context.Context, sessionIDs []string, appID *string, limit int) ([]*domain.Session, error) {
+	if appID != nil {
+		v := *appID
+		s.lastSessionAppID = &v
+	} else {
+		s.lastSessionAppID = nil
+	}
+	s.lastSessionIDs = append([]string(nil), sessionIDs...)
+	s.lastSessionLimit = limit
+	return append([]*domain.Session(nil), s.sessionListResults...), nil
+}
+
+func (s *testSessionRepo) UpsertSessionEdit(_ context.Context, edit *domain.SessionEdit) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.overlays == nil {
+		s.overlays = map[string]*domain.SessionEdit{}
+	}
+	cp := *edit
+	if existing, ok := s.overlays[edit.ID]; ok {
+		cp.Version = existing.Version + 1
+		cp.OriginalContent = existing.OriginalContent // preserve first snapshot
+		if !cp.EditedTagsSet {                        // COALESCE: keep prior tag override
+			cp.EditedTags = existing.EditedTags
+			cp.EditedTagsSet = existing.EditedTagsSet
+		}
+	} else {
+		cp.Version = 1
+	}
+	if cp.State == "" {
+		cp.State = domain.StateActive
+	}
+	s.overlays[edit.ID] = &cp
+	return nil
+}
+
+func (s *testSessionRepo) GetSessionEdit(_ context.Context, id string) (*domain.SessionEdit, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ov, ok := s.overlays[id]; ok && ov.State == domain.StateActive {
+		cp := *ov
+		return &cp, nil
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (s *testSessionRepo) GetSessionEditsByIDs(_ context.Context, ids []string) (map[string]*domain.SessionEdit, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]*domain.SessionEdit{}
+	for _, id := range ids {
+		if ov, ok := s.overlays[id]; ok && ov.State == domain.StateActive {
+			cp := *ov
+			out[id] = &cp
+		}
+	}
+	return out, nil
+}
+
+func (s *testSessionRepo) DeleteSessionEdit(_ context.Context, id string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.overlays[id]; ok {
+		delete(s.overlays, id)
+		return 1, nil
+	}
+	return 0, nil
 }
 
 func intPtr(v int) *int {
 	return &v
+}
+
+type captureMeteringWriter struct {
+	mu     sync.Mutex
+	events []metering.Event
+}
+
+func (w *captureMeteringWriter) Record(evt metering.Event) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	evt.Data = cloneMap(evt.Data)
+	w.events = append(w.events, evt)
+}
+
+func (w *captureMeteringWriter) Close(context.Context) error { return nil }
+
+func (w *captureMeteringWriter) snapshot() []metering.Event {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]metering.Event, len(w.events))
+	copy(out, w.events)
+	return out
+}
+
+type blockingMeteringWriter struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w *blockingMeteringWriter) Record(evt metering.Event) {
+	close(w.started)
+	<-w.release
+}
+
+func (w *blockingMeteringWriter) Close(context.Context) error { return nil }
+
+type captureRuntimeUsageManager struct {
+	mu                       sync.Mutex
+	beforeRecallCalls        int
+	afterRecallSuccessCalls  int
+	beforeCreateCalls        int
+	afterCreateSuccessCalls  int
+	afterCreateFailureCalls  int
+	beforeUpdateCalls        int
+	afterUpdateSuccessCalls  int
+	afterUpdateFailureCalls  int
+	beforeDeleteCalls        int
+	afterDeleteSuccessCalls  int
+	enabled                  bool
+	providerID               string
+	runtimeState             runtimeusage.RuntimeState
+	runtimeStateErr          error
+	runtimeStateCalls        int
+	runtimeStateSubjects     []runtimeusage.Subject
+	noticeStateCalls         int
+	noticeStateSubjects      []runtimeusage.Subject
+	afterCreateSuccessErr    error
+	beforeCreateErrByTenant  map[string]error
+	beforeRecallErr          error
+	beforeRecallSubjects     []runtimeusage.Subject
+	recallResults            []runtimeusage.RecallResult
+	recallSuccessContextErrs []error
+	afterRecallSuccessHook   func(context.Context) error
+	afterRecallFailureHook   func(context.Context)
+	noticeStateHook          func(context.Context) error
+	beforeCreateSubjects     []runtimeusage.Subject
+	createResults            []runtimeusage.MemoryCreateResult
+	createSuccessContextErrs []error
+	beforeUpdateSubjects     []runtimeusage.Subject
+	beforeDeleteSubjects     []runtimeusage.Subject
+	updateResults            []runtimeusage.MemoryUpdateResult
+	deleteResults            []runtimeusage.MemoryDeleteResult
+}
+
+func (m *captureRuntimeUsageManager) Enabled() bool      { return m.enabled }
+func (m *captureRuntimeUsageManager) ProviderID() string { return m.providerID }
+func (m *captureRuntimeUsageManager) RuntimeState(_ context.Context, subject runtimeusage.Subject) (runtimeusage.RuntimeState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.runtimeStateCalls++
+	m.runtimeStateSubjects = append(m.runtimeStateSubjects, subject)
+	if m.runtimeStateErr != nil {
+		return runtimeusage.RuntimeState{}, m.runtimeStateErr
+	}
+	if len(m.runtimeState.Meters) > 0 || m.runtimeState.Mem9APIKey.Status != "" || m.runtimeState.RecommendedAction != nil {
+		return m.runtimeState, nil
+	}
+	return runtimeusage.RuntimeUsageDisabledState(), nil
+}
+func (m *captureRuntimeUsageManager) RuntimeStateForNotice(ctx context.Context, subject runtimeusage.Subject) (runtimeusage.RuntimeState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.noticeStateCalls++
+	m.noticeStateSubjects = append(m.noticeStateSubjects, subject)
+	if m.noticeStateHook != nil {
+		if err := m.noticeStateHook(ctx); err != nil {
+			return runtimeusage.RuntimeState{}, err
+		}
+	}
+	if m.runtimeStateErr != nil {
+		return runtimeusage.RuntimeState{}, m.runtimeStateErr
+	}
+	if len(m.runtimeState.Meters) > 0 || m.runtimeState.Mem9APIKey.Status != "" || m.runtimeState.RecommendedAction != nil {
+		return m.runtimeState, nil
+	}
+	return runtimeusage.RuntimeUsageDisabledState(), nil
+}
+func (m *captureRuntimeUsageManager) BeforeRecall(_ context.Context, subject runtimeusage.Subject) (*runtimeusage.OperationLease, error) {
+	m.beforeRecallCalls++
+	m.beforeRecallSubjects = append(m.beforeRecallSubjects, subject)
+	if m.beforeRecallErr != nil {
+		return nil, m.beforeRecallErr
+	}
+	return &runtimeusage.OperationLease{OperationID: "op-recall", Reserved: true}, nil
+}
+func (m *captureRuntimeUsageManager) AfterRecallSuccess(ctx context.Context, _ *runtimeusage.OperationLease, result runtimeusage.RecallResult) error {
+	m.afterRecallSuccessCalls++
+	m.recallResults = append(m.recallResults, result)
+	m.recallSuccessContextErrs = append(m.recallSuccessContextErrs, ctx.Err())
+	if m.afterRecallSuccessHook != nil {
+		return m.afterRecallSuccessHook(ctx)
+	}
+	return nil
+}
+func (m *captureRuntimeUsageManager) AfterRecallFailure(ctx context.Context, _ *runtimeusage.OperationLease, _ error) {
+	if m.afterRecallFailureHook != nil {
+		m.afterRecallFailureHook(ctx)
+	}
+}
+func (m *captureRuntimeUsageManager) BeforeMemoryCreate(_ context.Context, subject runtimeusage.Subject, _ int64) (*runtimeusage.OperationLease, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.beforeCreateCalls++
+	m.beforeCreateSubjects = append(m.beforeCreateSubjects, subject)
+	if m.beforeCreateErrByTenant != nil {
+		if err := m.beforeCreateErrByTenant[subject.TenantID]; err != nil {
+			return nil, err
+		}
+	}
+	return &runtimeusage.OperationLease{OperationID: "op-create", Reserved: true}, nil
+}
+func (m *captureRuntimeUsageManager) AfterMemoryCreateSuccess(ctx context.Context, _ *runtimeusage.OperationLease, result runtimeusage.MemoryCreateResult) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.afterCreateSuccessCalls++
+	m.createResults = append(m.createResults, result)
+	m.createSuccessContextErrs = append(m.createSuccessContextErrs, ctx.Err())
+	return m.afterCreateSuccessErr
+}
+func (m *captureRuntimeUsageManager) AfterMemoryCreateFailure(context.Context, *runtimeusage.OperationLease, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.afterCreateFailureCalls++
+}
+func (m *captureRuntimeUsageManager) BeforeMemoryUpdate(_ context.Context, subject runtimeusage.Subject) (*runtimeusage.OperationLease, error) {
+	m.beforeUpdateCalls++
+	m.beforeUpdateSubjects = append(m.beforeUpdateSubjects, subject)
+	return &runtimeusage.OperationLease{OperationID: "op-update", Reserved: true}, nil
+}
+func (m *captureRuntimeUsageManager) AfterMemoryUpdateSuccess(_ context.Context, _ *runtimeusage.OperationLease, result runtimeusage.MemoryUpdateResult) error {
+	m.afterUpdateSuccessCalls++
+	m.updateResults = append(m.updateResults, result)
+	return nil
+}
+func (m *captureRuntimeUsageManager) AfterMemoryUpdateFailure(context.Context, *runtimeusage.OperationLease, error) {
+	m.afterUpdateFailureCalls++
+}
+func (m *captureRuntimeUsageManager) BeforeMemoryDelete(_ context.Context, subject runtimeusage.Subject) (*runtimeusage.OperationLease, error) {
+	m.beforeDeleteCalls++
+	m.beforeDeleteSubjects = append(m.beforeDeleteSubjects, subject)
+	return &runtimeusage.OperationLease{OperationID: "op-delete", Reserved: true}, nil
+}
+func (m *captureRuntimeUsageManager) AfterMemoryDeleteSuccess(_ context.Context, _ *runtimeusage.OperationLease, result runtimeusage.MemoryDeleteResult) error {
+	m.afterDeleteSuccessCalls++
+	m.deleteResults = append(m.deleteResults, result)
+	return nil
+}
+func (m *captureRuntimeUsageManager) AfterMemoryDeleteFailure(context.Context, *runtimeusage.OperationLease, error) {
+}
+
+func runtimeNoticeTestState(meter string) runtimeusage.RuntimeState {
+	percent := 82.0
+	remaining := int64(18)
+	capacity := int64(100)
+	return runtimeusage.RuntimeState{
+		Mem9APIKey: runtimeusage.RuntimeStateAPIKey{Status: runtimeusage.RuntimeAPIKeyStatusActive},
+		ProviderID: runtimeNoticeProviderID,
+		Meters: []runtimeusage.RuntimeStateMeter{{
+			Meter: meter,
+			Budgets: []runtimeusage.RuntimeStatusBudget{{
+				Type:  "includedQuota",
+				State: "warning",
+				Measure: runtimeusage.RuntimeStatusMeasure{
+					Kind:     runtimeusage.RuntimeMeasureKindCount,
+					Quantity: "request",
+					Scale:    1,
+				},
+				Period: runtimeusage.RuntimeStatusPeriod{
+					Type: "calendarMonth",
+				},
+				Capacity: runtimeusage.RuntimeStatusCapacity{
+					Type:  "limited",
+					Value: &capacity,
+				},
+				Usage: &runtimeusage.RuntimeStatusUsage{
+					Used:      nil,
+					Remaining: &remaining,
+					Percent:   &percent,
+				},
+			}},
+		}},
+	}
+}
+
+type handlerActivityTenantRepo struct {
+	mu              sync.Mutex
+	touchErr        error
+	upsertErr       error
+	count           int64
+	memoryTotal     int64
+	memoryLast7d    int64
+	touchCalls      int
+	upsertCalls     int
+	lastStatsTotal  int64
+	lastStatsLast7d int64
+	touched         chan string
+}
+
+func (r *handlerActivityTenantRepo) Create(context.Context, *domain.Tenant) error { return nil }
+func (r *handlerActivityTenantRepo) GetByID(context.Context, string) (*domain.Tenant, error) {
+	return nil, domain.ErrNotFound
+}
+func (r *handlerActivityTenantRepo) GetByName(context.Context, string) (*domain.Tenant, error) {
+	return nil, domain.ErrNotFound
+}
+func (r *handlerActivityTenantRepo) UpdateStatus(context.Context, string, domain.TenantStatus) error {
+	return nil
+}
+func (r *handlerActivityTenantRepo) UpdateSchemaVersion(context.Context, string, int) error {
+	return nil
+}
+
+func (r *handlerActivityTenantRepo) TouchActivity(_ context.Context, tenantID string, _ time.Time) error {
+	r.mu.Lock()
+	r.touchCalls++
+	touched := r.touched
+	touchErr := r.touchErr
+	r.mu.Unlock()
+
+	if touched != nil {
+		select {
+		case touched <- tenantID:
+		default:
+		}
+	}
+	return touchErr
+}
+
+func (r *handlerActivityTenantRepo) UpsertMemoryStats(_ context.Context, tenantID string, _ time.Time, total, last7d int64, _ time.Time) error {
+	r.mu.Lock()
+	r.upsertCalls++
+	r.lastStatsTotal = total
+	r.lastStatsLast7d = last7d
+	touched := r.touched
+	upsertErr := r.upsertErr
+	r.mu.Unlock()
+
+	if touched != nil {
+		select {
+		case touched <- tenantID:
+		default:
+		}
+	}
+	return upsertErr
+}
+
+func (r *handlerActivityTenantRepo) CountActiveTenantsSince(context.Context, time.Time) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.count, nil
+}
+
+func (r *handlerActivityTenantRepo) SumActiveMemoryStats(context.Context) (int64, int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.memoryTotal, r.memoryLast7d, nil
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func waitForMeteringEvents(t *testing.T, writer *captureMeteringWriter, want int, timeout time.Duration) []metering.Event {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		events := writer.snapshot()
+		if len(events) == want {
+			return events
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	events := writer.snapshot()
+	t.Fatalf("timed out waiting for %d metering events, got %d", want, len(events))
+	return nil
+}
+
+func ensureNoMeteringEvents(t *testing.T, writer *captureMeteringWriter, timeout time.Duration) {
+	t.Helper()
+	time.Sleep(timeout)
+	events := writer.snapshot()
+	if len(events) != 0 {
+		t.Fatalf("expected no metering events, got %+v", events)
+	}
+}
+
+var handlerErrorDBRegisterOnce sync.Once
+
+func openHandlerErrorDB(t *testing.T) *sql.DB {
+	t.Helper()
+	handlerErrorDBRegisterOnce.Do(func() {
+		sql.Register("handler-error-db", handlerErrorDriver{})
+	})
+	db, err := sql.Open("handler-error-db", "")
+	if err != nil {
+		t.Fatalf("open handler error db: %v", err)
+	}
+	return db
+}
+
+type handlerErrorDriver struct{}
+
+func (handlerErrorDriver) Open(string) (driver.Conn, error) {
+	return handlerErrorConn{}, nil
+}
+
+type handlerErrorConn struct{}
+
+func (handlerErrorConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (handlerErrorConn) Close() error {
+	return nil
+}
+
+func (handlerErrorConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (handlerErrorConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	return nil, errors.New("schema unavailable")
+}
+
+func (handlerErrorConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return nil, errors.New("schema unavailable")
 }
 
 // newTestServer creates a Server with pre-populated svcCache for testing.
@@ -158,7 +774,1054 @@ func newTestServer(memRepo *testMemoryRepo, sessRepo *testSessionRepo) *Server {
 	// Key format matches resolveServices: fmt.Sprintf("db-%p", auth.TenantDB)
 	// When TenantDB is nil, %p formats as "0x0".
 	srv.svcCache.Store(tenantSvcKey("db-0x0"), svc)
+	srv.svcCache.Store(tenantSvcKey("tenant-a-0x0"), svc)
 	return srv
+}
+
+func storeTestTenantServices(srv *Server, tenantID string, memRepo *testMemoryRepo) {
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(memRepo, nil, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, nil, nil, "", service.ModeSmart),
+		session: service.NewSessionService(&testSessionRepo{}, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey(fmt.Sprintf("%s-0x0", tenantID)), svc)
+}
+
+type captureWebhookStore struct {
+	mu     sync.Mutex
+	events []webhook.EventRecord
+}
+
+func (s *captureWebhookStore) EnsureSchema(context.Context) error                     { return nil }
+func (s *captureWebhookStore) CreateEndpoint(context.Context, webhook.Endpoint) error { return nil }
+func (s *captureWebhookStore) ListEndpoints(context.Context, string, string) ([]webhook.Endpoint, error) {
+	return nil, nil
+}
+func (s *captureWebhookStore) GetEndpoint(context.Context, string, string, string) (*webhook.Endpoint, error) {
+	return nil, domain.ErrNotFound
+}
+func (s *captureWebhookStore) UpdateEndpoint(context.Context, webhook.Endpoint) error { return nil }
+func (s *captureWebhookStore) UpdateEndpointSecret(context.Context, webhook.Endpoint) error {
+	return nil
+}
+func (s *captureWebhookStore) SoftDeleteEndpoint(context.Context, string, string, string) error {
+	return nil
+}
+func (s *captureWebhookStore) EnqueueEvent(_ context.Context, event webhook.EventRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+func (s *captureWebhookStore) EnqueueTestEvent(context.Context, webhook.Endpoint, webhook.EventRecord) (webhook.Delivery, error) {
+	return webhook.Delivery{}, nil
+}
+func (s *captureWebhookStore) ListDeliveries(context.Context, string, string, int) ([]webhook.Delivery, error) {
+	return nil, nil
+}
+func (s *captureWebhookStore) FetchDueDeliveries(context.Context, int) ([]webhook.DeliveryJob, error) {
+	return nil, nil
+}
+func (s *captureWebhookStore) MarkDeliveryDelivered(context.Context, string, int) error { return nil }
+func (s *captureWebhookStore) MarkDeliveryFailedAttempt(context.Context, string, bool, time.Time, *int, string) error {
+	return nil
+}
+
+func TestResolveServicesDoesNotCacheAfterRuntimeSchemaEnsureFailure(t *testing.T) {
+	db := openHandlerErrorDB(t)
+	defer db.Close()
+
+	tenantSvc := service.NewTenantService(nil, nil, nil, nil, "", 0, 0, false, nil)
+	srv := NewServer(tenantSvc, nil, "", nil, nil, "", false, service.ModeSmart, "tidb", slog.Default())
+	auth := &domain.AuthInfo{
+		TenantID: "tenant-a",
+		TenantDB: db,
+	}
+	key := tenantSvcKey(fmt.Sprintf("%s-%p", auth.TenantID, auth.TenantDB))
+
+	first := srv.resolveServices(auth)
+	if first.memory == nil || first.ingest == nil || first.session == nil {
+		t.Fatal("resolveServices returned incomplete services")
+	}
+	if _, ok := srv.svcCache.Load(key); ok {
+		t.Fatal("runtime schema ensure failure must not cache services")
+	}
+
+	second := srv.resolveServices(auth)
+	if _, ok := srv.svcCache.Load(key); ok {
+		t.Fatal("runtime schema retry failure must not cache services")
+	}
+	if first.memory == second.memory {
+		t.Fatal("expected uncached resolveServices call to build a fresh service bundle")
+	}
+}
+
+func TestReconcileRoutedChainFactsRuntimeUsageUsesTargetSubjects(t *testing.T) {
+	targetARepo := &testMemoryRepo{}
+	targetBRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+	storeTestTenantServices(srv, "tenant-target-a", targetARepo)
+	storeTestTenantServices(srv, "tenant-target-b", targetBRepo)
+
+	auth := &domain.AuthInfo{
+		AgentName: "chain-agent",
+		Chain: &domain.ChainAuth{
+			ChainID: "chain-a",
+			APIKey:  "chain-key-a",
+			Nodes: []domain.ChainAuthNode{
+				{
+					SpaceChainNode: domain.SpaceChainNode{TenantID: "tenant-source", ExternalSpaceID: "space-source", Position: 0},
+					ClusterID:      "cluster-source",
+				},
+				{
+					SpaceChainNode: domain.SpaceChainNode{
+						TenantID:             "tenant-target-a",
+						ExternalSpaceID:      "space-target-a",
+						Position:             1,
+						RoutingPolicyEnabled: true,
+						RoutingPolicyPrompt:  "facts about mem9",
+					},
+					ClusterID: "cluster-target-a",
+				},
+				{
+					SpaceChainNode: domain.SpaceChainNode{
+						TenantID:             "tenant-target-b",
+						ExternalSpaceID:      "space-target-b",
+						Position:             2,
+						RoutingPolicyEnabled: true,
+						RoutingPolicyPrompt:  "facts about PingCAP",
+					},
+					ClusterID: "cluster-target-b",
+				},
+			},
+		},
+	}
+
+	result := srv.reconcileRoutedChainFacts(context.Background(), auth, service.IngestRequest{
+		AgentID:            "actor-agent",
+		SessionID:          "session-a",
+		ExternalProvenance: &service.ExternalProvenance{Schema: service.ExternalProvenanceSchema, SourceMessageID: "message_routed"},
+	}, []service.ExtractedFact{
+		{Text: "mem9 uses PingCAP TiDB for this test", Tags: []string{"tech"}, RouteTargets: []string{"space-target-a", "space-target-b"}},
+	})
+
+	if result.memoriesChanged != 2 {
+		t.Fatalf("memoriesChanged = %d, want 2", result.memoriesChanged)
+	}
+	if len(targetARepo.createCalls) != 1 || len(targetBRepo.createCalls) != 1 {
+		t.Fatalf("target writes = %d/%d, want 1/1", len(targetARepo.createCalls), len(targetBRepo.createCalls))
+	}
+	for _, created := range []*domain.Memory{targetARepo.createCalls[0], targetBRepo.createCalls[0]} {
+		var metadata struct {
+			ExternalProvenance *service.ExternalProvenance `json:"external_provenance"`
+		}
+		if err := json.Unmarshal(created.Metadata, &metadata); err != nil || metadata.ExternalProvenance == nil || metadata.ExternalProvenance.SourceMessageID != "message_routed" {
+			t.Fatalf("routed metadata = %s, error = %v", created.Metadata, err)
+		}
+	}
+	if runtimeUsage.beforeCreateCalls != 2 || runtimeUsage.afterCreateSuccessCalls != 2 {
+		t.Fatalf("runtime create calls = before:%d success:%d, want 2/2", runtimeUsage.beforeCreateCalls, runtimeUsage.afterCreateSuccessCalls)
+	}
+	wantSubjects := map[string]string{
+		"tenant-target-a": "cluster-target-a",
+		"tenant-target-b": "cluster-target-b",
+	}
+	for _, subject := range runtimeUsage.beforeCreateSubjects {
+		wantCluster, ok := wantSubjects[subject.TenantID]
+		if !ok {
+			t.Fatalf("unexpected create subject: %+v", subject)
+		}
+		if subject.ClusterID != wantCluster || subject.APIKeySubject != "chain-key-a" {
+			t.Fatalf("create subject = %+v, want cluster=%s apiKey=chain-key-a", subject, wantCluster)
+		}
+		delete(wantSubjects, subject.TenantID)
+	}
+	if len(wantSubjects) != 0 {
+		t.Fatalf("missing create subjects: %+v", wantSubjects)
+	}
+	for _, createResult := range runtimeUsage.createResults {
+		if createResult.AgentName != "chain-agent" || createResult.ObjectsAffected != 1 || len(createResult.MemoryIDs) != 1 {
+			t.Fatalf("create result = %+v, want chain-agent/1 object/1 memory", createResult)
+		}
+	}
+}
+
+func TestReconcileRoutedChainFactsUpdateUsesCurrentExternalProvenance(t *testing.T) {
+	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{
+				"content": `{"memory":[{"id":"0","text":"Works at company Y","event":"UPDATE","old_memory":"Works at startup X"}]}`,
+			}}},
+		})
+	}))
+	defer mockLLM.Close()
+	llmClient := llm.New(llm.Config{APIKey: "test-key", BaseURL: mockLLM.URL, Model: "test-model"})
+	oldMetadata := json.RawMessage(`{"external_provenance":{"schema":"agent9/message-source@1","source_message_id":"message_old"}}`)
+	predecessor := domain.Memory{
+		ID:         "memory_old",
+		Content:    "Works at startup X",
+		MemoryType: domain.TypeInsight,
+		State:      domain.StateActive,
+		Metadata:   oldMetadata,
+	}
+	targetRepo := &testMemoryRepo{
+		createCalls:         []*domain.Memory{&predecessor},
+		vectorSearchResults: []domain.Memory{predecessor},
+	}
+	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{})
+	srv.svcCache.Store(tenantSvcKey("tenant-target-a-0x0"), resolvedSvc{
+		memory:  service.NewMemoryService(targetRepo, nil, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(targetRepo, llmClient, nil, "auto-model", service.ModeSmart),
+		session: service.NewSessionService(&testSessionRepo{}, nil, ""),
+	})
+	auth := &domain.AuthInfo{
+		AgentName: "chain-agent",
+		Chain: &domain.ChainAuth{
+			ChainID: "chain-a",
+			Nodes: []domain.ChainAuthNode{
+				{
+					SpaceChainNode: domain.SpaceChainNode{TenantID: "tenant-source", ExternalSpaceID: "space-source", Position: 0},
+				},
+				{
+					SpaceChainNode: domain.SpaceChainNode{
+						TenantID:             "tenant-target-a",
+						ExternalSpaceID:      "space-target-a",
+						Position:             1,
+						RoutingPolicyEnabled: true,
+						RoutingPolicyPrompt:  "employment facts",
+					},
+				},
+			},
+		},
+	}
+
+	result := srv.reconcileRoutedChainFacts(context.Background(), auth, service.IngestRequest{
+		AgentID:            "actor-agent",
+		SessionID:          "session-a",
+		ExternalProvenance: &service.ExternalProvenance{Schema: service.ExternalProvenanceSchema, SourceMessageID: "message_current"},
+	}, []service.ExtractedFact{{
+		Text:         "Works at company Y",
+		RouteTargets: []string{"space-target-a"},
+	}})
+
+	if result.memoriesChanged != 1 || len(targetRepo.createCalls) != 2 {
+		t.Fatalf("result = %+v, create calls = %d, want one routed update", result, len(targetRepo.createCalls))
+	}
+	for _, check := range []struct {
+		name     string
+		metadata json.RawMessage
+		want     string
+	}{
+		{name: "successor", metadata: targetRepo.createCalls[1].Metadata, want: "message_current"},
+		{name: "predecessor", metadata: predecessor.Metadata, want: "message_old"},
+	} {
+		var decoded struct {
+			ExternalProvenance *service.ExternalProvenance `json:"external_provenance"`
+		}
+		if err := json.Unmarshal(check.metadata, &decoded); err != nil || decoded.ExternalProvenance == nil || decoded.ExternalProvenance.SourceMessageID != check.want {
+			t.Fatalf("%s metadata = %s, error = %v, want source %s", check.name, check.metadata, err, check.want)
+		}
+	}
+}
+
+func TestReconcileRoutedChainFactsSkipsTargetWhenRuntimeUsageDenied(t *testing.T) {
+	targetRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled: true,
+		beforeCreateErrByTenant: map[string]error{
+			"tenant-target-a": &runtimeusage.QuotaDeniedError{StatusCode: http.StatusPaymentRequired},
+		},
+	}
+	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+	storeTestTenantServices(srv, "tenant-target-a", targetRepo)
+
+	auth := &domain.AuthInfo{
+		AgentName: "chain-agent",
+		Chain: &domain.ChainAuth{
+			ChainID: "chain-a",
+			APIKey:  "chain-key-a",
+			Nodes: []domain.ChainAuthNode{
+				{
+					SpaceChainNode: domain.SpaceChainNode{TenantID: "tenant-source", ExternalSpaceID: "space-source", Position: 0},
+					ClusterID:      "cluster-source",
+				},
+				{
+					SpaceChainNode: domain.SpaceChainNode{
+						TenantID:             "tenant-target-a",
+						ExternalSpaceID:      "space-target-a",
+						Position:             1,
+						RoutingPolicyEnabled: true,
+						RoutingPolicyPrompt:  "facts about mem9",
+					},
+					ClusterID: "cluster-target-a",
+				},
+			},
+		},
+	}
+
+	result := srv.reconcileRoutedChainFacts(context.Background(), auth, service.IngestRequest{
+		AgentID:   "actor-agent",
+		SessionID: "session-a",
+	}, []service.ExtractedFact{
+		{Text: "mem9 should not write when target quota is denied", Tags: []string{"tech"}, RouteTargets: []string{"space-target-a"}},
+	})
+
+	if result.memoriesChanged != 0 {
+		t.Fatalf("memoriesChanged = %d, want 0", result.memoriesChanged)
+	}
+	if result.warnings != 1 {
+		t.Fatalf("warnings = %d, want 1", result.warnings)
+	}
+	if len(targetRepo.createCalls) != 0 {
+		t.Fatalf("target writes = %d, want 0", len(targetRepo.createCalls))
+	}
+	if runtimeUsage.beforeCreateCalls != 1 {
+		t.Fatalf("BeforeMemoryCreate calls = %d, want 1", runtimeUsage.beforeCreateCalls)
+	}
+	if runtimeUsage.afterCreateSuccessCalls != 0 || runtimeUsage.afterCreateFailureCalls != 0 {
+		t.Fatalf("runtime finalization calls = success:%d failure:%d, want 0/0", runtimeUsage.afterCreateSuccessCalls, runtimeUsage.afterCreateFailureCalls)
+	}
+}
+
+func TestReconcileRoutedChainFactsWebhookOnlySkipsTargetWrite(t *testing.T) {
+	targetRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	webhookStore := &captureWebhookStore{}
+	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{}).
+		WithRuntimeUsage(runtimeUsage).
+		WithWebhookService(webhook.NewService(webhookStore, nil, true))
+	storeTestTenantServices(srv, "tenant-target-a", targetRepo)
+
+	auth := &domain.AuthInfo{
+		AgentName: "chain-agent",
+		Chain: &domain.ChainAuth{
+			ChainID: "chain-a",
+			APIKey:  "chain-key-a",
+			Nodes: []domain.ChainAuthNode{
+				{
+					SpaceChainNode: domain.SpaceChainNode{TenantID: "tenant-source", ExternalSpaceID: "space-source", Position: 0},
+					ClusterID:      "cluster-source",
+				},
+				{
+					SpaceChainNode: domain.SpaceChainNode{
+						ID:                       "node-target-a",
+						TenantID:                 "tenant-target-a",
+						ExternalSpaceID:          "space-target-a",
+						Position:                 1,
+						RoutingPolicyEnabled:     true,
+						RoutingPolicyPrompt:      "facts about mem9",
+						RoutingPolicyWebhookOnly: true,
+					},
+					ClusterID: "cluster-target-a",
+				},
+			},
+		},
+	}
+
+	result := srv.reconcileRoutedChainFacts(context.Background(), auth, service.IngestRequest{
+		AgentID:   "actor-agent",
+		AppID:     "app-a",
+		SessionID: "session-a",
+	}, []service.ExtractedFact{
+		{Text: "mem9 uses webhooks for review", Tags: []string{"tech"}, RouteTargets: []string{"space-target-a"}},
+	})
+
+	if result.memoriesChanged != 0 || len(result.insightIDs) != 0 || result.warnings != 0 {
+		t.Fatalf("result = %+v, want no memory changes or warnings", result)
+	}
+	if len(targetRepo.createCalls) != 0 {
+		t.Fatalf("target writes = %d, want 0", len(targetRepo.createCalls))
+	}
+	if runtimeUsage.beforeCreateCalls != 0 || runtimeUsage.afterCreateSuccessCalls != 0 || runtimeUsage.afterCreateFailureCalls != 0 {
+		t.Fatalf("runtime create calls = before:%d success:%d failure:%d, want 0/0/0", runtimeUsage.beforeCreateCalls, runtimeUsage.afterCreateSuccessCalls, runtimeUsage.afterCreateFailureCalls)
+	}
+
+	webhookStore.mu.Lock()
+	events := append([]webhook.EventRecord(nil), webhookStore.events...)
+	webhookStore.mu.Unlock()
+	if len(events) != 1 {
+		t.Fatalf("webhook events = %d, want 1", len(events))
+	}
+	if events[0].ScopeType != webhook.ScopeChain || events[0].ScopeID != "chain-a" || events[0].EventType != webhook.EventSpaceChainFactRouted {
+		t.Fatalf("webhook event = %+v, want chain fact routed for chain-a", events[0])
+	}
+	var envelope webhook.EventEnvelope
+	if err := json.Unmarshal(events[0].Payload, &envelope); err != nil {
+		t.Fatalf("decode webhook envelope: %v", err)
+	}
+	var data struct {
+		WebhookOnly           bool                    `json:"webhook_only"`
+		TargetTenantID        string                  `json:"target_tenant_id"`
+		TargetExternalSpaceID string                  `json:"target_external_space_id"`
+		RoutingPolicyNodeID   string                  `json:"routing_policy_node_id"`
+		SourceFacts           []service.ExtractedFact `json:"source_facts"`
+		TargetMemory          *domain.Memory          `json:"target_memory"`
+		AgentID               string                  `json:"agent_id"`
+		AppID                 string                  `json:"appId"`
+		SessionID             string                  `json:"session_id"`
+	}
+	if err := json.Unmarshal(envelope.Data, &data); err != nil {
+		t.Fatalf("decode webhook data: %v", err)
+	}
+	if !data.WebhookOnly || data.TargetMemory != nil {
+		t.Fatalf("webhook data target memory/webhook_only = %v/%#v, want true/nil", data.WebhookOnly, data.TargetMemory)
+	}
+	if data.TargetTenantID != "tenant-target-a" || data.TargetExternalSpaceID != "space-target-a" || data.RoutingPolicyNodeID != "node-target-a" {
+		t.Fatalf("webhook target data = %+v, want target node identifiers", data)
+	}
+	if len(data.SourceFacts) != 1 || data.SourceFacts[0].Text != "mem9 uses webhooks for review" {
+		t.Fatalf("source facts = %+v, want original routed fact", data.SourceFacts)
+	}
+	if data.AgentID != "actor-agent" || data.AppID != "app-a" || data.SessionID != "session-a" {
+		t.Fatalf("actor data = %+v, want request actor fields", data)
+	}
+}
+
+func TestListMemories_SessionTypeListsSessionRows(t *testing.T) {
+	sessionRepo := &testSessionRepo{
+		listResults: []domain.Memory{
+			{
+				ID:         "sess-row-1",
+				Content:    "hello from a raw turn",
+				MemoryType: domain.TypeSession,
+				State:      domain.StateActive,
+				CreatedAt:  time.Now(),
+				UpdatedAt:  time.Now(),
+			},
+		},
+		listTotal: 7,
+	}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+	req := makeRequest(t, http.MethodGet, "/memories?memory_type=session&limit=10&offset=20&state=active&agent_id=codex&session_id=sess-1&source=cli&tags=alpha,beta", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Total != 7 || resp.Limit != 10 || resp.Offset != 20 {
+		t.Fatalf("page = total:%d limit:%d offset:%d, want 7/10/20", resp.Total, resp.Limit, resp.Offset)
+	}
+	if len(resp.Memories) != 1 || resp.Memories[0].MemoryType != domain.TypeSession {
+		t.Fatalf("memories = %+v, want one session memory", resp.Memories)
+	}
+	if sessionRepo.lastListFilter.MemoryType != "session" ||
+		sessionRepo.lastListFilter.AgentID != "codex" ||
+		sessionRepo.lastListFilter.SessionID != "sess-1" ||
+		sessionRepo.lastListFilter.Source != "cli" ||
+		len(sessionRepo.lastListFilter.Tags) != 2 {
+		t.Fatalf("session list filter = %+v", sessionRepo.lastListFilter)
+	}
+}
+
+func TestListMemories_DefaultListUsesUnifiedAllTypesPage(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		listResults: []domain.Memory{
+			{
+				ID:         "insight-1",
+				Content:    "stable preference",
+				MemoryType: domain.TypeInsight,
+				State:      domain.StateActive,
+				CreatedAt:  now.Add(-time.Hour),
+				UpdatedAt:  now.Add(-time.Hour),
+			},
+		},
+		listTotal: 1000,
+		allTypeListResults: []domain.Memory{
+			{
+				ID:         "session-1",
+				Content:    "raw conversation turn",
+				MemoryType: domain.TypeSession,
+				State:      domain.StateActive,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+		},
+		allTypeListTotal: 2000,
+	}
+	sessionRepo := &testSessionRepo{
+		listResults: []domain.Memory{
+			{
+				ID:         "session-1",
+				Content:    "raw conversation turn",
+				MemoryType: domain.TypeSession,
+				State:      domain.StateActive,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+		},
+		listTotal: 1000,
+	}
+	srv := newTestServer(memRepo, sessionRepo)
+	req := makeRequest(t, http.MethodGet, "/memories?limit=1", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Total != 2000 || resp.Limit != 1 || resp.Offset != 0 {
+		t.Fatalf("page = total:%d limit:%d offset:%d, want 2000/1/0", resp.Total, resp.Limit, resp.Offset)
+	}
+	if len(resp.Memories) != 1 || resp.Memories[0].ID != "session-1" {
+		t.Fatalf("memories = %+v, want unified all-types page", resp.Memories)
+	}
+	if memRepo.allTypeListCalls != 1 || memRepo.listCalls != 0 || sessionRepo.listCalls != 0 {
+		t.Fatalf("list calls = all-types:%d memory:%d session:%d, want 1/0/0",
+			memRepo.allTypeListCalls, memRepo.listCalls, sessionRepo.listCalls)
+	}
+	if memRepo.lastAllTypeListFilter.Limit != 1 || memRepo.lastAllTypeListFilter.Offset != 0 {
+		t.Fatalf("all-types filter = %+v, want limit=1 offset=0", memRepo.lastAllTypeListFilter)
+	}
+}
+
+func TestListMemories_DefaultListAllowsPaginationWithinExpandedWindow(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+	req := makeRequest(t, http.MethodGet, "/memories?limit=200&offset=99800", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if memRepo.allTypeListCalls != 1 {
+		t.Fatalf("all-types list calls = %d, want 1", memRepo.allTypeListCalls)
+	}
+	if memRepo.lastAllTypeListFilter.Limit != 200 || memRepo.lastAllTypeListFilter.Offset != 99800 {
+		t.Fatalf("all-types filter = %+v, want limit=200 offset=99800", memRepo.lastAllTypeListFilter)
+	}
+}
+
+func TestListMemories_DefaultListRejectsPaginationBeyondExpandedWindow(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+	req := makeRequest(t, http.MethodGet, "/memories?limit=200&offset=99801", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "all-types maximum of 100000") {
+		t.Fatalf("body = %q, want expanded-window validation error", rr.Body.String())
+	}
+	if memRepo.allTypeListCalls != 0 {
+		t.Fatalf("all-types list calls = %d, want 0", memRepo.allTypeListCalls)
+	}
+}
+
+func TestListMemories_DefaultListRejectsUnsupportedSortOptions(t *testing.T) {
+	for _, query := range []string{
+		"sort_by=content",
+		"sort_by=memory_type",
+		"sort_by=tags",
+		"sort_by=unknown",
+		"sort_dir=sideways",
+	} {
+		t.Run(query, func(t *testing.T) {
+			memRepo := &testMemoryRepo{}
+			srv := newTestServer(memRepo, &testSessionRepo{})
+			req := makeRequest(t, http.MethodGet, "/memories?"+query, nil)
+			rr := httptest.NewRecorder()
+
+			srv.listMemories(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rr.Code, rr.Body.String())
+			}
+			if memRepo.allTypeListCalls != 0 {
+				t.Fatalf("all-types list calls = %d, want 0", memRepo.allTypeListCalls)
+			}
+		})
+	}
+}
+
+func TestListMemories_ScanAllListsAllLocalMemoryTypes(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		listResults: []domain.Memory{
+			{
+				ID:         "insight-1",
+				Content:    "HEARTBEAT insight",
+				MemoryType: domain.TypeInsight,
+				State:      domain.StateActive,
+				CreatedAt:  now.Add(-2 * time.Hour),
+				UpdatedAt:  now.Add(-2 * time.Hour),
+			},
+		},
+		listTotal: 1,
+	}
+	sessionRepo := &testSessionRepo{
+		listResults: []domain.Memory{
+			{
+				ID:         "session-1",
+				Content:    "HEARTBEAT session",
+				MemoryType: domain.TypeSession,
+				State:      domain.StateActive,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+		},
+		listTotal: 1,
+	}
+	srv := newTestServer(memRepo, sessionRepo)
+	req := makeRequest(t, http.MethodGet, "/memories?q=HEARTBEAT&limit=50&scanAll=true&sort_by=updated_at&sort_dir=desc", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Total != 2 || resp.Limit != 50 || resp.Offset != 0 {
+		t.Fatalf("page = total:%d limit:%d offset:%d, want 2/50/0", resp.Total, resp.Limit, resp.Offset)
+	}
+	if len(resp.Memories) != 2 {
+		t.Fatalf("len(memories) = %d, want 2", len(resp.Memories))
+	}
+	if resp.Memories[0].ID != "session-1" || resp.Memories[1].ID != "insight-1" {
+		t.Fatalf("memory order = [%s %s], want [session-1 insight-1]", resp.Memories[0].ID, resp.Memories[1].ID)
+	}
+	if memRepo.listCalls != 1 || sessionRepo.listCalls != 1 {
+		t.Fatalf("list calls = memory:%d session:%d, want 1/1", memRepo.listCalls, sessionRepo.listCalls)
+	}
+	if memRepo.lastListFilter.Query != "HEARTBEAT" ||
+		!memRepo.lastListFilter.ScanAll ||
+		memRepo.lastListFilter.SortBy != "updated_at" ||
+		memRepo.lastListFilter.SortDir != "desc" ||
+		memRepo.lastListFilter.Limit != 200 {
+		t.Fatalf("memory list filter = %+v", memRepo.lastListFilter)
+	}
+	if sessionRepo.lastListFilter.Query != "HEARTBEAT" ||
+		!sessionRepo.lastListFilter.ScanAll ||
+		sessionRepo.lastListFilter.SortBy != "updated_at" ||
+		sessionRepo.lastListFilter.SortDir != "desc" ||
+		sessionRepo.lastListFilter.Limit != 200 {
+		t.Fatalf("session list filter = %+v", sessionRepo.lastListFilter)
+	}
+}
+
+func TestListMemories_RecordsMemoryRecallDuration(t *testing.T) {
+	resetMemoryRecallMetrics()
+
+	memRepo := &testMemoryRepo{
+		listResults: []domain.Memory{
+			{
+				ID:         "insight-1",
+				Content:    "HEARTBEAT insight",
+				MemoryType: domain.TypeInsight,
+				State:      domain.StateActive,
+				CreatedAt:  time.Now(),
+				UpdatedAt:  time.Now(),
+			},
+		},
+		listTotal: 1,
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+	req := makeRequest(t, http.MethodGet, "/memories?q=HEARTBEAT&memory_type=insight&scanAll=true", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if got := memoryRecallHistogramCount(t, "scan_all", "ok"); got != 1 {
+		t.Fatalf("memory recall histogram count = %d, want 1", got)
+	}
+}
+
+func TestListMemories_RecordsMemoryRecallTimeout(t *testing.T) {
+	resetMemoryRecallMetrics()
+
+	memRepo := &testMemoryRepo{listErr: context.DeadlineExceeded}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+	req := makeRequest(t, http.MethodGet, "/memories?q=HEARTBEAT&memory_type=insight&scanAll=true", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if got := memoryRecallHistogramCount(t, "scan_all", "timeout"); got != 1 {
+		t.Fatalf("memory recall timeout histogram count = %d, want 1", got)
+	}
+	if got := memoryRecallTimeoutCounter(t, "scan_all"); got != 1 {
+		t.Fatalf("memory recall timeout counter = %v, want 1", got)
+	}
+}
+
+func resetMemoryRecallMetrics() {
+	metrics.MemoryRecallDuration.Reset()
+	metrics.MemoryRecallTimeoutsTotal.Reset()
+}
+
+func memoryRecallHistogramCount(t *testing.T, mode, status string) uint64 {
+	t.Helper()
+
+	observer, err := metrics.MemoryRecallDuration.GetMetricWithLabelValues(mode, status)
+	if err != nil {
+		t.Fatalf("get memory recall duration metric: %v", err)
+	}
+	metric, ok := observer.(interface{ Write(*dto.Metric) error })
+	if !ok {
+		t.Fatal("memory recall duration metric does not implement Write")
+	}
+	var pb dto.Metric
+	if err := metric.Write(&pb); err != nil {
+		t.Fatalf("write memory recall duration metric: %v", err)
+	}
+	if pb.Histogram == nil {
+		return 0
+	}
+	return pb.Histogram.GetSampleCount()
+}
+
+func memoryRecallTimeoutCounter(t *testing.T, mode string) float64 {
+	t.Helper()
+
+	counter, err := metrics.MemoryRecallTimeoutsTotal.GetMetricWithLabelValues(mode)
+	if err != nil {
+		t.Fatalf("get memory recall timeout metric: %v", err)
+	}
+	metric, ok := counter.(interface{ Write(*dto.Metric) error })
+	if !ok {
+		t.Fatal("memory recall timeout metric does not implement Write")
+	}
+	var pb dto.Metric
+	if err := metric.Write(&pb); err != nil {
+		t.Fatalf("write memory recall timeout metric: %v", err)
+	}
+	if pb.Counter == nil {
+		return 0
+	}
+	return pb.Counter.GetValue()
+}
+
+func TestListMemories_ContentKeywordSearchBypassesRecall(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchResults: []domain.Memory{
+			{
+				ID:         "insight-zh",
+				Content:    "mem9小组负责本周的控制台验证",
+				MemoryType: domain.TypeInsight,
+				State:      domain.StateActive,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+		},
+	}
+	sessionRepo := &testSessionRepo{
+		keywordSearchHook: func(context.Context, string, domain.MemoryFilter, int) ([]domain.Memory, error) {
+			t.Fatal("content keyword list search must not call session recall search")
+			return nil, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessionRepo)
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("mem9小组")+"&search_mode=keyword&limit=10&state=active&memory_type=insight", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Total != 1 || len(resp.Memories) != 1 || resp.Memories[0].ID != "insight-zh" {
+		t.Fatalf("unexpected response: total=%d memories=%+v", resp.Total, resp.Memories)
+	}
+	if memRepo.lastKeywordQuery != "mem9小组" {
+		t.Fatalf("keyword query = %q, want mem9小组", memRepo.lastKeywordQuery)
+	}
+	if memRepo.lastKeywordFilter.State != "active" || memRepo.lastKeywordFilter.Query != "mem9小组" || memRepo.lastKeywordFilter.MemoryType != "insight" {
+		t.Fatalf("keyword filter = %+v", memRepo.lastKeywordFilter)
+	}
+	if memRepo.lastKeywordLimit != 30 {
+		t.Fatalf("keyword limit = %d, want 30", memRepo.lastKeywordLimit)
+	}
+	if sessionRepo.listCalls != 0 {
+		t.Fatalf("session list calls = %d, want 0", sessionRepo.listCalls)
+	}
+}
+
+func TestListMemories_ContentKeywordSearchAllTypesIncludesSessions(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchResults: []domain.Memory{
+			{
+				ID:         "insight-zh",
+				Content:    "mem9小组负责本周的控制台验证",
+				MemoryType: domain.TypeInsight,
+				State:      domain.StateActive,
+				CreatedAt:  now.Add(-time.Minute),
+				UpdatedAt:  now.Add(-time.Minute),
+			},
+		},
+	}
+	sessionRepo := &testSessionRepo{
+		keywordSearchResults: []domain.Memory{
+			{
+				ID:         "session-zh",
+				Content:    "mem9小组周会会记录原始 session",
+				MemoryType: domain.TypeSession,
+				State:      domain.StateActive,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+		},
+	}
+	srv := newTestServer(memRepo, sessionRepo)
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("小组")+"&search_mode=keyword&limit=10&state=active&sort_by=updated_at&sort_dir=desc", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Total != 2 || len(resp.Memories) != 2 {
+		t.Fatalf("unexpected response: total=%d memories=%+v", resp.Total, resp.Memories)
+	}
+	if resp.Memories[0].ID != "session-zh" || resp.Memories[1].ID != "insight-zh" {
+		t.Fatalf("unexpected order: %+v", resp.Memories)
+	}
+	if memRepo.lastKeywordFilter.Query != "小组" || sessionRepo.lastKeywordFilter.Query != "小组" {
+		t.Fatalf("keyword filters = memory:%+v session:%+v", memRepo.lastKeywordFilter, sessionRepo.lastKeywordFilter)
+	}
+}
+
+func TestListMemories_ChainSessionTypeListsSessionRowsWithoutQuery(t *testing.T) {
+	now := time.Now()
+	sessionRepo := &testSessionRepo{
+		listResults: []domain.Memory{
+			{
+				ID:         "sess-row-1",
+				Content:    "hello from a raw turn",
+				MemoryType: domain.TypeSession,
+				State:      domain.StateActive,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+		},
+		listTotal: 1,
+	}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+	req := makeChainRequestWithNodes(t, http.MethodGet, "/memories?memory_type=session&limit=10&offset=0&state=active", nil, 2)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if sessionRepo.listCalls != 2 {
+		t.Fatalf("session list calls = %d, want one per chain node", sessionRepo.listCalls)
+	}
+	if resp.Total != 1 {
+		t.Fatalf("total = %d, want deduplicated total 1", resp.Total)
+	}
+	if len(resp.Memories) != 1 || resp.Memories[0].MemoryType != domain.TypeSession {
+		t.Fatalf("memories = %+v, want one session memory", resp.Memories)
+	}
+	if resp.Memories[0].ChainSource == nil || resp.Memories[0].ChainSource.ChainID != "chain-a" {
+		t.Fatalf("chain source = %+v, want chain-a", resp.Memories[0].ChainSource)
+	}
+	if sessionRepo.lastListFilter.MemoryType != "session" || sessionRepo.lastListFilter.State != "active" {
+		t.Fatalf("session list filter = %+v", sessionRepo.lastListFilter)
+	}
+}
+
+func TestGetMemory_FallsBackToSessionRow(t *testing.T) {
+	sessionRepo := &testSessionRepo{
+		getResult: &domain.Memory{
+			ID:         "sess-row-1",
+			Content:    "raw turn",
+			MemoryType: domain.TypeSession,
+			State:      domain.StateActive,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		},
+	}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+	req := makeRequest(t, http.MethodGet, "/memories/sess-row-1", nil)
+	req = withURLParam(req, "id", "sess-row-1")
+	rr := httptest.NewRecorder()
+
+	srv.getMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"memory_type":"session"`) {
+		t.Fatalf("body = %s, want session memory type", rr.Body.String())
+	}
+}
+
+func TestGetMemory_ReturnsExternalProvenanceMetadataAsStored(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata json.RawMessage
+	}{
+		{
+			name:     "validated envelope",
+			metadata: json.RawMessage(`{"external_provenance":{"schema":"agent9/message-source@1","source_message_id":"message_valid"},"generic":"kept"}`),
+		},
+		{
+			name:     "historical malformed envelope",
+			metadata: json.RawMessage(`{"external_provenance":{"schema":"agent9/message-source@2","source_message_id":331,"extra":"untrusted"},"generic":"kept"}`),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			memRepo := &testMemoryRepo{createCalls: []*domain.Memory{{
+				ID:         "mem-provenance",
+				Content:    "stored fact",
+				MemoryType: domain.TypeInsight,
+				Metadata:   tt.metadata,
+				State:      domain.StateActive,
+				Version:    1,
+			}}}
+			srv := newTestServer(memRepo, &testSessionRepo{})
+			req := withURLParam(makeRequest(t, http.MethodGet, "/memories/mem-provenance", nil), "id", "mem-provenance")
+			rr := httptest.NewRecorder()
+
+			srv.getMemory(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+			}
+			var response domain.Memory
+			if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			var got, want any
+			if err := json.Unmarshal(response.Metadata, &got); err != nil {
+				t.Fatalf("decode returned metadata: %v", err)
+			}
+			if err := json.Unmarshal(tt.metadata, &want); err != nil {
+				t.Fatalf("decode expected metadata: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("metadata = %#v, want stored %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestGetMemory_SessionUnsupportedFallbackReturnsNotFound(t *testing.T) {
+	sessionRepo := &testSessionRepo{getErr: domain.ErrNotSupported}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+	req := makeRequest(t, http.MethodGet, "/memories/missing-id", nil)
+	req = withURLParam(req, "id", "missing-id")
+	rr := httptest.NewRecorder()
+
+	srv.getMemory(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestGetMemory_ChainFallsBackToSessionRow(t *testing.T) {
+	sessionRepo := &testSessionRepo{
+		getResult: &domain.Memory{
+			ID:         "sess-row-1",
+			Content:    "raw turn",
+			MemoryType: domain.TypeSession,
+			State:      domain.StateActive,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		},
+	}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+	req := withURLParam(makeChainRequest(t, http.MethodGet, "/memories/sess-row-1", nil), "id", "sess-row-1")
+	rr := httptest.NewRecorder()
+
+	srv.getMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"memory_type":"session"`) {
+		t.Fatalf("body = %s, want session memory type", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"chain_source"`) {
+		t.Fatalf("body = %s, want chain source", rr.Body.String())
+	}
+}
+
+func TestDeleteMemory_FallsBackToSessionRow(t *testing.T) {
+	memRepo := &testMemoryRepo{softDeleteErr: domain.ErrNotFound}
+	sessionRepo := &testSessionRepo{}
+	srv := newTestServer(memRepo, sessionRepo)
+	req := makeRequest(t, http.MethodDelete, "/memories/sess-row-1", nil)
+	req = withURLParam(req, "id", "sess-row-1")
+	rr := httptest.NewRecorder()
+
+	srv.deleteMemory(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rr.Code, rr.Body.String())
+	}
+	if len(sessionRepo.softDeleteCalls) != 1 || sessionRepo.softDeleteCalls[0] != "sess-row-1" {
+		t.Fatalf("session delete calls = %+v, want sess-row-1", sessionRepo.softDeleteCalls)
+	}
+}
+
+func TestDeleteMemory_ChainFallsBackToSessionRow(t *testing.T) {
+	memRepo := &testMemoryRepo{softDeleteErr: domain.ErrNotFound}
+	sessionRepo := &testSessionRepo{
+		getResult: &domain.Memory{
+			ID:         "sess-row-1",
+			Content:    "raw turn",
+			MemoryType: domain.TypeSession,
+			State:      domain.StateActive,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		},
+	}
+	srv := newTestServer(memRepo, sessionRepo)
+	req := withURLParam(makeChainRequest(t, http.MethodDelete, "/memories/sess-row-1", nil), "id", "sess-row-1")
+	rr := httptest.NewRecorder()
+
+	srv.deleteMemory(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rr.Code, rr.Body.String())
+	}
+	if len(sessionRepo.softDeleteCalls) != 1 || sessionRepo.softDeleteCalls[0] != "sess-row-1" {
+		t.Fatalf("session delete calls = %+v, want sess-row-1", sessionRepo.softDeleteCalls)
+	}
 }
 
 // makeRequest creates an HTTP request with auth context injected.
@@ -178,8 +1841,57 @@ func makeRequest(t *testing.T, method, path string, body any) *http.Request {
 	return req.WithContext(ctx)
 }
 
+func makeTenantRequest(t *testing.T, method, path string, body any) *http.Request {
+	t.Helper()
+	req := makeRequest(t, method, path, body)
+	auth := &domain.AuthInfo{
+		AgentName: "test-agent",
+		TenantID:  "tenant-a",
+		ClusterID: "10006636",
+	}
+	ctx := middleware.WithAuthContext(req.Context(), auth)
+	return req.WithContext(ctx)
+}
+
+func makeChainRequest(t *testing.T, method, path string, body any) *http.Request {
+	t.Helper()
+	return makeChainRequestWithNodes(t, method, path, body, 1)
+}
+
+func makeChainRequestWithNodes(t *testing.T, method, path string, body any, count int) *http.Request {
+	t.Helper()
+	req := makeRequest(t, method, path, body)
+	nodes := make([]domain.ChainAuthNode, 0, count)
+	for i := 0; i < count; i++ {
+		nodes = append(nodes, domain.ChainAuthNode{
+			SpaceChainNode: domain.SpaceChainNode{
+				TenantID: "tenant-a",
+				Position: i + 1,
+			},
+			ClusterID: "10006636",
+		})
+	}
+	auth := &domain.AuthInfo{
+		AgentName: "test-agent",
+		Chain: &domain.ChainAuth{
+			ChainID: "chain-a",
+			APIKey:  "chain-key-a",
+			Nodes:   nodes,
+		},
+	}
+	ctx := middleware.WithAuthContext(req.Context(), auth)
+	return req.WithContext(ctx)
+}
+
+func withURLParam(req *http.Request, key string, value string) *http.Request {
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(key, value)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
 func TestCreateMemory_SyncContent_Returns200(t *testing.T) {
-	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{})
+	memRepo := &testMemoryRepo{}
+	srv := newTestServer(memRepo, &testSessionRepo{})
 
 	body := map[string]any{
 		"content": "test memory content",
@@ -192,6 +1904,833 @@ func TestCreateMemory_SyncContent_Returns200(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "ok" {
+		t.Fatalf("expected status=ok, got %q", resp["status"])
+	}
+	if len(memRepo.createCalls) != 1 {
+		t.Fatalf("expected legacy create path to write once, got %d", len(memRepo.createCalls))
+	}
+	if memRepo.bulkCreateCalls != 0 {
+		t.Fatalf("expected legacy create path to skip bulk create, got %d", memRepo.bulkCreateCalls)
+	}
+}
+
+func newChainContentLLMTestServer(t *testing.T, llmCalls *atomic.Int32) (*Server, *testMemoryRepo) {
+	t.Helper()
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		llmCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts":[{"text":"rewritten smart fact","tags":["smart"]}],"message_tags":[["smart"]]}`,
+				}},
+			},
+		})
+	}))
+	t.Cleanup(llmServer.Close)
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default())
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(memRepo, llmClient, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(sessRepo, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("tenant-a-0x0"), svc)
+	return srv, memRepo
+}
+
+func makeChainContentRequestWithoutRouting(t *testing.T, syncCreate bool) *http.Request {
+	t.Helper()
+	body := map[string]any{
+		"agent_id": "actor-agent",
+		"content":  "original chain content",
+	}
+	if syncCreate {
+		body["sync"] = true
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	auth := &domain.AuthInfo{
+		AgentName: "test-agent",
+		Chain: &domain.ChainAuth{
+			ChainID: "chain-a",
+			APIKey:  "chain-key-a",
+			Nodes: []domain.ChainAuthNode{
+				{
+					SpaceChainNode: domain.SpaceChainNode{
+						TenantID:        "tenant-a",
+						ExternalSpaceID: "space-source",
+						Position:        0,
+					},
+					ClusterID: "10006636",
+				},
+			},
+		},
+	}
+	ctx := middleware.WithAuthContext(req.Context(), auth)
+	return req.WithContext(ctx)
+}
+
+func TestCreateMemory_SyncChainContentWithoutRoutingPolicyUsesLegacyCreate(t *testing.T) {
+	var llmCalls atomic.Int32
+	srv, memRepo := newChainContentLLMTestServer(t, &llmCalls)
+	req := makeChainContentRequestWithoutRouting(t, true)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if got := llmCalls.Load(); got != 1 {
+		t.Fatalf("LLM calls = %d, want 1", got)
+	}
+	if len(memRepo.createCalls) != 1 {
+		t.Fatalf("create calls = %d, want 1", len(memRepo.createCalls))
+	}
+	if memRepo.createCalls[0].Source != "actor-agent" {
+		t.Fatalf("created source = %q, want actor-agent", memRepo.createCalls[0].Source)
+	}
+}
+
+func TestCreateMemory_AsyncChainContentWithoutRoutingPolicyUsesLegacyCreate(t *testing.T) {
+	var llmCalls atomic.Int32
+	srv, memRepo := newChainContentLLMTestServer(t, &llmCalls)
+	req := makeChainContentRequestWithoutRouting(t, false)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rr.Code, rr.Body.String())
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		memRepo.mu.Lock()
+		created := len(memRepo.createCalls)
+		memRepo.mu.Unlock()
+		if created > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := llmCalls.Load(); got != 1 {
+		t.Fatalf("LLM calls = %d, want 1", got)
+	}
+	memRepo.mu.Lock()
+	defer memRepo.mu.Unlock()
+	if len(memRepo.createCalls) != 1 {
+		t.Fatalf("create calls = %d, want 1", len(memRepo.createCalls))
+	}
+	if memRepo.createCalls[0].Source != "actor-agent" {
+		t.Fatalf("created source = %q, want actor-agent", memRepo.createCalls[0].Source)
+	}
+}
+
+func TestCreateMemory_SyncMessagesWithMetadataPreservesMetadata(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts": [{"text": "Test fact with metadata", "tags": ["test"]}], "message_tags": [["test"]]}`,
+				}},
+			},
+		})
+	}))
+	t.Cleanup(llmServer.Close)
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default())
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(memRepo, llmClient, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(sessRepo, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("db-0x0"), svc)
+
+	body := map[string]any{
+		"agent_id":   "agent-1",
+		"session_id": "sess-metadata-test",
+		"mode":       "smart",
+		"sync":       true,
+		"messages": []map[string]string{
+			{"role": "user", "content": "This is a test with metadata"},
+		},
+		"metadata": map[string]any{
+			"source": "unit-test",
+			"key":    "val",
+			"external_provenance": map[string]string{
+				"schema":            "agent9/message-source@1",
+				"source_message_id": "message_handler_source",
+			},
+		},
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+
+	memRepo.mu.Lock()
+	defer memRepo.mu.Unlock()
+
+	if len(memRepo.createCalls) == 0 {
+		t.Fatal("expected at least one Create call")
+	}
+
+	if len(memRepo.updateCalls) != 1 {
+		t.Fatalf("expected 1 UpdateOptimistic call for metadata merge, got %d", len(memRepo.updateCalls))
+	}
+
+	// The update call carries the merged metadata (user keys merged on top of
+	// any provenance metadata from ReconcilePhase2).
+	var updatedMeta map[string]json.RawMessage
+	if err := json.Unmarshal(memRepo.updateCalls[0].Metadata, &updatedMeta); err != nil {
+		t.Fatalf("update metadata unmarshal error: %v", err)
+	}
+	var sourceVal string
+	if raw, ok := updatedMeta["source"]; ok {
+		json.Unmarshal(raw, &sourceVal)
+	}
+	if sourceVal != "unit-test" {
+		t.Fatalf("updated metadata.source = %q, want unit-test", sourceVal)
+	}
+	var keyVal string
+	if raw, ok := updatedMeta["key"]; ok {
+		json.Unmarshal(raw, &keyVal)
+	}
+	if keyVal != "val" {
+		t.Fatalf("updated metadata.key = %q, want val", keyVal)
+	}
+	var externalProvenance service.ExternalProvenance
+	if err := json.Unmarshal(updatedMeta["external_provenance"], &externalProvenance); err != nil {
+		t.Fatalf("updated external_provenance unmarshal error: %v", err)
+	}
+	if externalProvenance.Schema != service.ExternalProvenanceSchema || externalProvenance.SourceMessageID != "message_handler_source" {
+		t.Fatalf("updated external_provenance = %+v", externalProvenance)
+	}
+
+	// Verify mergeMetadata preserves existing keys.
+	m := mergeMetadata(
+		json.RawMessage(`{"source_seqs":[0],"temporal":{"display":"2026"}}`),
+		json.RawMessage(`{"source":"unit-test","key":"val"}`),
+	)
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(m, &merged); err != nil {
+		t.Fatalf("mergeMetadata result unmarshal error: %v", err)
+	}
+	if _, ok := merged["source_seqs"]; !ok {
+		t.Fatal("mergeMetadata dropped source_seqs from base")
+	}
+	if _, ok := merged["temporal"]; !ok {
+		t.Fatal("mergeMetadata dropped temporal from base")
+	}
+	if _, ok := merged["source"]; !ok {
+		t.Fatal("mergeMetadata dropped source from incoming")
+	}
+	if _, ok := merged["key"]; !ok {
+		t.Fatal("mergeMetadata dropped key from incoming")
+	}
+}
+
+func TestMergeMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     json.RawMessage
+		incoming json.RawMessage
+		wantKeys []string
+	}{
+		{
+			name:     "nil base returns incoming",
+			base:     nil,
+			incoming: json.RawMessage(`{"a":"1"}`),
+			wantKeys: []string{"a"},
+		},
+		{
+			name:     "nil incoming returns base",
+			base:     json.RawMessage(`{"a":"1"}`),
+			incoming: nil,
+			wantKeys: []string{"a"},
+		},
+		{
+			name:     "both nil returns nil",
+			base:     nil,
+			incoming: nil,
+			wantKeys: nil,
+		},
+		{
+			name:     "merge preserves base keys",
+			base:     json.RawMessage(`{"source_seqs":[1,2],"temporal":{"t":"2026"}}`),
+			incoming: json.RawMessage(`{"source_kind":"channel"}`),
+			wantKeys: []string{"source_seqs", "temporal", "source_kind"},
+		},
+		{
+			name:     "incoming overrides base on conflict",
+			base:     json.RawMessage(`{"key":"old"}`),
+			incoming: json.RawMessage(`{"key":"new"}`),
+			wantKeys: []string{"key"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeMetadata(tt.base, tt.incoming)
+			if tt.wantKeys == nil {
+				if len(got) != 0 {
+					t.Fatalf("expected nil/empty, got %s", got)
+				}
+				return
+			}
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(got, &m); err != nil {
+				t.Fatalf("unmarshal error: %v", err)
+			}
+			for _, k := range tt.wantKeys {
+				if _, ok := m[k]; !ok {
+					t.Fatalf("missing key %q in %s", k, got)
+				}
+			}
+			if tt.name == "incoming overrides base on conflict" {
+				var v string
+				json.Unmarshal(m["key"], &v)
+				if v != "new" {
+					t.Fatalf("key = %q, want new", v)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateMemory_RuntimeUsageAllowsSmartContentWrite(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"content": "test memory content",
+		"sync":    true,
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeCreateCalls != 1 {
+		t.Fatalf("BeforeMemoryCreate calls = %d, want 1", runtimeUsage.beforeCreateCalls)
+	}
+	if len(memRepo.createCalls) != 1 {
+		t.Fatalf("create calls = %d, want 1", len(memRepo.createCalls))
+	}
+}
+
+func TestCreateMemory_RuntimeUsageAllowsPinnedKnownDelta(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"content":     "test memory content",
+		"memory_type": "pinned",
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeCreateCalls != 1 {
+		t.Fatalf("BeforeMemoryCreate calls = %d, want 1", runtimeUsage.beforeCreateCalls)
+	}
+	if memRepo.bulkCreateCalls != 1 {
+		t.Fatalf("bulk create calls = %d, want 1", memRepo.bulkCreateCalls)
+	}
+}
+
+func TestCreateMemory_RuntimeUsageReserveRateLimitStopsTenantWrite(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled: true,
+		beforeCreateErrByTenant: map[string]error{
+			"tenant-a": newRuntimeUsageReservationResponseError(
+				t,
+				http.StatusTooManyRequests,
+				`{"code":"registry_busy","details":{"retryable":true}}`,
+				"1",
+			),
+		},
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+	req := makeTenantRequest(t, http.MethodPost, "/memories", map[string]any{
+		"content":     "must not be written",
+		"memory_type": "pinned",
+	})
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429: %s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Retry-After") != "1" {
+		t.Fatalf("Retry-After = %q, want 1", rr.Header().Get("Retry-After"))
+	}
+	if memRepo.bulkCreateCalls != 0 || len(memRepo.createCalls) != 0 {
+		t.Fatalf("tenant writes = bulk:%d create:%d, want 0", memRepo.bulkCreateCalls, len(memRepo.createCalls))
+	}
+	if runtimeUsage.afterCreateSuccessCalls != 0 || runtimeUsage.afterCreateFailureCalls != 0 {
+		t.Fatalf("runtime finalization calls = success:%d failure:%d, want 0/0", runtimeUsage.afterCreateSuccessCalls, runtimeUsage.afterCreateFailureCalls)
+	}
+}
+
+func TestListMemories_RuntimeUsageReserveConflictStopsTenantRecall(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled: true,
+		beforeRecallErr: newRuntimeUsageReservationResponseError(
+			t,
+			http.StatusConflict,
+			`{"code":"registry_conflict","details":{"retryable":true}}`,
+		),
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+	req := makeTenantRequest(t, http.MethodGet, "/memories?q=must-not-run", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rr.Code, rr.Body.String())
+	}
+	if memRepo.searchCalls != 0 || memRepo.listCalls != 0 || memRepo.allTypeListCalls != 0 {
+		t.Fatalf("tenant recall calls = search:%d list:%d all:%d, want 0", memRepo.searchCalls, memRepo.listCalls, memRepo.allTypeListCalls)
+	}
+	if runtimeUsage.afterRecallSuccessCalls != 0 {
+		t.Fatalf("AfterRecallSuccess calls = %d, want 0", runtimeUsage.afterRecallSuccessCalls)
+	}
+}
+
+func TestRuntimeUsageReserveCallerCancellationReturns499(t *testing.T) {
+	tests := []struct {
+		name              string
+		request           func(*testing.T) *http.Request
+		run               func(*Server, http.ResponseWriter, *http.Request)
+		assertTenantFence func(*testing.T, *testMemoryRepo)
+	}{
+		{
+			name: "recall",
+			request: func(t *testing.T) *http.Request {
+				return makeTenantRequest(t, http.MethodGet, "/memories?q=must-not-run", nil)
+			},
+			run: func(srv *Server, w http.ResponseWriter, r *http.Request) {
+				srv.listMemories(w, r)
+			},
+			assertTenantFence: func(t *testing.T, repo *testMemoryRepo) {
+				if repo.searchCalls != 0 || repo.listCalls != 0 || repo.allTypeListCalls != 0 {
+					t.Fatalf("tenant recall calls = search:%d list:%d all:%d, want 0", repo.searchCalls, repo.listCalls, repo.allTypeListCalls)
+				}
+			},
+		},
+		{
+			name: "write",
+			request: func(t *testing.T) *http.Request {
+				return makeTenantRequest(t, http.MethodPost, "/memories", map[string]any{
+					"content":     "must not be written",
+					"memory_type": "pinned",
+				})
+			},
+			run: func(srv *Server, w http.ResponseWriter, r *http.Request) {
+				srv.createMemory(w, r)
+			},
+			assertTenantFence: func(t *testing.T, repo *testMemoryRepo) {
+				if repo.bulkCreateCalls != 0 || len(repo.createCalls) != 0 {
+					t.Fatalf("tenant writes = bulk:%d create:%d, want 0", repo.bulkCreateCalls, len(repo.createCalls))
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+			reserveStarted := make(chan struct{}, 1)
+			releaseProvider := make(chan struct{})
+			var providerRequests atomic.Int32
+			provider := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				providerRequests.Add(1)
+				select {
+				case reserveStarted <- struct{}{}:
+				default:
+				}
+				select {
+				case <-r.Context().Done():
+				case <-releaseProvider:
+				}
+			}))
+			defer provider.Close()
+			defer close(releaseProvider)
+
+			meteringWriter := &captureMeteringWriter{}
+			runtimeUsage := runtimeusage.NewManager(
+				runtimeusage.Config{Enabled: true},
+				runtimeusage.NewHTTPClient(provider.URL, "test-secret", time.Second),
+				meteringWriter,
+				logger,
+			)
+			memRepo := &testMemoryRepo{}
+			srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+			srv.logger = logger
+			req := tt.request(t)
+			ctx, cancel := context.WithCancel(req.Context())
+			defer cancel()
+			req = req.WithContext(ctx)
+			rr := httptest.NewRecorder()
+			done := make(chan struct{})
+
+			go func() {
+				defer close(done)
+				tt.run(srv, rr, req)
+			}()
+
+			select {
+			case <-reserveStarted:
+			case <-time.After(time.Second):
+				t.Fatal("Runtime Usage Reserve did not start")
+			}
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("handler did not return after caller cancellation")
+			}
+
+			if rr.Code != statusClientClosedRequest {
+				t.Fatalf("status = %d, want 499: %s", rr.Code, rr.Body.String())
+			}
+			if got := rr.Body.String(); got != "{\"error\":\"client closed request\"}\n" {
+				t.Fatalf("body = %q, want client closed request response", got)
+			}
+			tt.assertTenantFence(t, memRepo)
+			if got := providerRequests.Load(); got != 1 {
+				t.Fatalf("Runtime Usage provider requests = %d, want 1 Reserve and no Finalize", got)
+			}
+			if got := len(meteringWriter.snapshot()); got != 0 {
+				t.Fatalf("Runtime Usage metering events = %d, want 0", got)
+			}
+
+			entry := findHandlerLogEntry(t, decodeHandlerLogs(t, &logBuf), "runtime usage request failed")
+			assertHandlerLogField(t, entry, "level", "INFO")
+			assertHandlerLogField(t, entry, "error_class", "client_canceled")
+			assertHandlerLogField(t, entry, "error_source", "request_context")
+			assertHandlerLogField(t, entry, "error_role", runtimeUsageRoleClientResponse)
+			assertHandlerLogField(t, entry, "stage", runtimeUsageStageReserve)
+			assertHandlerLogField(t, entry, "http_status", float64(statusClientClosedRequest))
+			assertHandlerLogField(t, entry, "retryable", false)
+		})
+	}
+}
+
+func TestCreateMemory_RuntimeUsageNoticeAddsTopLevelFieldsToCreatedMemory(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled:      true,
+		providerID:   runtimeNoticeProviderID,
+		runtimeState: runtimeNoticeTestState(runtimeusage.MeterMemoryWriteRequests),
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"content":     "test memory content",
+		"memory_type": "pinned",
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		ID           string                     `json:"id"`
+		Message      string                     `json:"message"`
+		RuntimeState *runtimeusage.RuntimeState `json:"runtimeState"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ID == "" {
+		t.Fatal("id is empty")
+	}
+	if !strings.Contains(resp.Message, "mem9 memory saving has used 82% of included quota") {
+		t.Fatalf("message = %q, want memory saving quota warning", resp.Message)
+	}
+	if resp.RuntimeState == nil || resp.RuntimeState.ProviderID != runtimeNoticeProviderID {
+		t.Fatalf("runtimeState = %+v, want provider id", resp.RuntimeState)
+	}
+	if runtimeUsage.runtimeStateCalls != 0 {
+		t.Fatalf("RuntimeState calls = %d, want 0", runtimeUsage.runtimeStateCalls)
+	}
+	if runtimeUsage.noticeStateCalls != 1 {
+		t.Fatalf("RuntimeStateForNotice calls = %d, want 1", runtimeUsage.noticeStateCalls)
+	}
+	if len(runtimeUsage.noticeStateSubjects) != 1 || runtimeUsage.noticeStateSubjects[0].APIKeySubject != "tenant-a" {
+		t.Fatalf("notice state subjects = %+v, want tenant-a subject", runtimeUsage.noticeStateSubjects)
+	}
+}
+
+func TestCreateMemory_RuntimeUsageFinalizationFailureFailsClosed(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled:               true,
+		afterCreateSuccessErr: &runtimeusage.UnavailableError{Err: errors.New("console unavailable")},
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"content":     "test memory content",
+		"memory_type": "pinned",
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeCreateCalls != 1 {
+		t.Fatalf("BeforeMemoryCreate calls = %d, want 1", runtimeUsage.beforeCreateCalls)
+	}
+	if runtimeUsage.afterCreateFailureCalls != 0 {
+		t.Fatalf("AfterMemoryCreateFailure calls = %d, want 0", runtimeUsage.afterCreateFailureCalls)
+	}
+	if memRepo.bulkCreateCalls != 1 {
+		t.Fatalf("bulk create calls = %d, want 1", memRepo.bulkCreateCalls)
+	}
+}
+
+func TestCreateMemory_ActivityFailureDoesNotFailWrite(t *testing.T) {
+	memRepo := &testMemoryRepo{countStatsTotal: 1}
+	activityRepo := &handlerActivityTenantRepo{
+		upsertErr: errors.New("activity unavailable"),
+		touched:   make(chan string, 1),
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).
+		WithActivityTracker(service.NewActivityTracker(activityRepo, slog.Default()))
+
+	body := map[string]any{
+		"content": "test memory content",
+		"sync":    true,
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	select {
+	case tenantID := <-activityRepo.touched:
+		if tenantID != "tenant-a" {
+			t.Fatalf("activity tenant = %q, want tenant-a", tenantID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for activity touch")
+	}
+}
+
+func TestRefreshWriteMetricsRecordsMemoryStats(t *testing.T) {
+	memRepo := &testMemoryRepo{countStatsTotal: 42, countStatsLast7d: 7}
+	activityRepo := &handlerActivityTenantRepo{
+		count:        1,
+		memoryTotal:  42,
+		memoryLast7d: 7,
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).
+		WithActivityTracker(service.NewActivityTracker(activityRepo, slog.Default()))
+	svc := resolvedSvc{memory: service.NewMemoryService(memRepo, nil, nil, "", service.ModeSmart)}
+	auth := &domain.AuthInfo{TenantID: "tenant-a", ClusterID: "10006636"}
+
+	srv.refreshWriteMetrics(auth, svc, 1)
+
+	activityRepo.mu.Lock()
+	upsertCalls := activityRepo.upsertCalls
+	touchCalls := activityRepo.touchCalls
+	statsTotal := activityRepo.lastStatsTotal
+	statsLast7d := activityRepo.lastStatsLast7d
+	activityRepo.mu.Unlock()
+	if upsertCalls != 1 || touchCalls != 0 || statsTotal != 42 || statsLast7d != 7 {
+		t.Fatalf("activity = upsert:%d touch:%d stats:%d/%d, want 1/0/42/7", upsertCalls, touchCalls, statsTotal, statsLast7d)
+	}
+}
+
+func TestRefreshWriteMetricsSkipsStatsWhenActivityTrackerMissing(t *testing.T) {
+	memRepo := &testMemoryRepo{countStatsTotal: 42, countStatsLast7d: 7}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+	svc := resolvedSvc{memory: service.NewMemoryService(memRepo, nil, nil, "", service.ModeSmart)}
+	auth := &domain.AuthInfo{TenantID: "tenant-a", ClusterID: "10006636"}
+
+	srv.refreshWriteMetrics(auth, svc, 1)
+
+	memRepo.mu.Lock()
+	countStatsCalls := memRepo.countStatsCalls
+	memRepo.mu.Unlock()
+	if countStatsCalls != 0 {
+		t.Fatalf("CountStats calls = %d, want 0", countStatsCalls)
+	}
+}
+
+func TestCreateMemory_CountStatsFailureStillRecordsActivity(t *testing.T) {
+	memRepo := &testMemoryRepo{countStatsErr: errors.New("count failed")}
+	activityRepo := &handlerActivityTenantRepo{
+		touched: make(chan string, 1),
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).
+		WithActivityTracker(service.NewActivityTracker(activityRepo, slog.Default()))
+
+	body := map[string]any{
+		"content": "test memory content",
+		"sync":    true,
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	select {
+	case tenantID := <-activityRepo.touched:
+		if tenantID != "tenant-a" {
+			t.Fatalf("activity tenant = %q, want tenant-a", tenantID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for activity touch")
+	}
+	activityRepo.mu.Lock()
+	touchCalls := activityRepo.touchCalls
+	upsertCalls := activityRepo.upsertCalls
+	activityRepo.mu.Unlock()
+	if touchCalls != 1 || upsertCalls != 0 {
+		t.Fatalf("activity calls = touch:%d upsert:%d, want 1/0", touchCalls, upsertCalls)
+	}
+}
+
+func TestCreateMemory_ContentWithPinnedMemoryType_Returns201Memory(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+	content := "remember I prefer pour-over coffee"
+
+	body := map[string]any{
+		"content":     content,
+		"memory_type": "pinned",
+		"tags":        []string{"preference", "coffee"},
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp domain.Memory
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.MemoryType != domain.TypePinned {
+		t.Fatalf("expected pinned memory type, got %q", resp.MemoryType)
+	}
+	if resp.Content != content {
+		t.Fatalf("expected content %q, got %q", content, resp.Content)
+	}
+	if memRepo.bulkCreateCalls != 1 {
+		t.Fatalf("expected pinned content path to use bulk create once, got %d", memRepo.bulkCreateCalls)
+	}
+	if len(memRepo.createCalls) != 0 {
+		t.Fatalf("expected pinned content path to skip legacy create, got %d", len(memRepo.createCalls))
+	}
+}
+
+func TestCreateMemory_ContentWithUnsupportedExplicitMemoryType_Returns400(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+
+	body := map[string]any{
+		"content":     "remember this",
+		"memory_type": "insight",
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp["error"], "memory_type") {
+		t.Fatalf("expected memory_type validation error, got %q", resp["error"])
+	}
+	if memRepo.bulkCreateCalls != 0 {
+		t.Fatalf("expected validation failure to skip bulk create, got %d", memRepo.bulkCreateCalls)
+	}
+	if len(memRepo.createCalls) != 0 {
+		t.Fatalf("expected validation failure to skip legacy create, got %d", len(memRepo.createCalls))
+	}
+}
+
+func TestCreateMemory_MessagesWithMemoryType_Returns400(t *testing.T) {
+	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{})
+
+	body := map[string]any{
+		"messages":    []map[string]string{{"role": "user", "content": "hello"}},
+		"memory_type": "pinned",
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -246,7 +2785,8 @@ func TestCreateMemory_AsyncContent_Returns202(t *testing.T) {
 }
 
 func TestCreateMemory_SyncMessages_Returns200(t *testing.T) {
-	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{})
+	sessRepo := &testSessionRepo{}
+	srv := newTestServer(&testMemoryRepo{}, sessRepo)
 
 	body := map[string]any{
 		"messages": []map[string]string{
@@ -263,6 +2803,405 @@ func TestCreateMemory_SyncMessages_Returns200(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !sessRepo.bulkCreateCalled {
+		t.Fatal("expected raw sessions to be persisted by default")
+	}
+}
+
+func TestCreateMemory_SyncMessages_DisableSessionSaveSkipsRawSessionAndStoresFacts(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts":[{"text":"User prefers tea","tags":["preference"]}],"message_tags":[["preference"],[]]}`,
+				}},
+			},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default())
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(memRepo, llmClient, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(sessRepo, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("db-0x0"), svc)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "I prefer tea"},
+			{"role": "assistant", "content": "Noted"},
+		},
+		"session_id":         "test-session",
+		"sync":               true,
+		"disableSessionSave": true,
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if sessRepo.bulkCreateCalled {
+		t.Fatal("did not expect raw session BulkCreate when disableSessionSave=true")
+	}
+	if sessRepo.patchTagsCalled {
+		t.Fatal("did not expect session PatchTags when disableSessionSave=true")
+	}
+	if len(memRepo.createCalls) != 1 {
+		t.Fatalf("expected one extracted fact memory, got %d", len(memRepo.createCalls))
+	}
+	if memRepo.createCalls[0].Content != "User prefers tea" {
+		t.Fatalf("created memory content = %q, want extracted fact", memRepo.createCalls[0].Content)
+	}
+}
+
+func TestCreateMemory_SyncMessages_TransientFactsSaveRawSessionButNoInsight(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts":[{"text":"Is working out now","tags":["fitness"],"fact_type":"transient_status"}],"message_tags":[["fitness"],[]]}`,
+				}},
+			},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default())
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(memRepo, llmClient, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(sessRepo, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("db-0x0"), svc)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "Is working out now"},
+			{"role": "assistant", "content": "Got it"},
+		},
+		"session_id": "test-session",
+		"sync":       true,
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !sessRepo.bulkCreateCalled {
+		t.Fatal("expected raw session BulkCreate to run")
+	}
+	if len(memRepo.createCalls) != 0 {
+		t.Fatalf("created insights = %d, want 0", len(memRepo.createCalls))
+	}
+}
+
+func TestCreateMemory_SyncMessages_DisableSessionSaveTransientFactWritesNothing(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts":[{"text":"Considering consuming protein powder tonight (2026-06-14).","fact_type":"ephemeral_intent"}],"message_tags":[["diet"],[]]}`,
+				}},
+			},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default())
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(memRepo, llmClient, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(sessRepo, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("db-0x0"), svc)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "Considering consuming protein powder tonight (2026-06-14)."},
+			{"role": "assistant", "content": "Got it"},
+		},
+		"session_id":         "test-session",
+		"sync":               true,
+		"disableSessionSave": true,
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if sessRepo.bulkCreateCalled || sessRepo.patchTagsCalled {
+		t.Fatal("did not expect raw session writes when disableSessionSave=true")
+	}
+	if len(memRepo.createCalls) != 0 {
+		t.Fatalf("created insights = %d, want 0", len(memRepo.createCalls))
+	}
+}
+
+func TestCreateMemory_ChainTransientFactDoesNotRoute(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts":[{"text":"Is working out now","tags":["fitness"],"fact_type":"transient_status","route_targets":["space-target"]}],"message_tags":[["fitness"],[]]}`,
+				}},
+			},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	sourceRepo := &testMemoryRepo{}
+	sourceSessionRepo := &testSessionRepo{}
+	targetRepo := &testMemoryRepo{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default())
+	sourceSvc := resolvedSvc{
+		memory:  service.NewMemoryService(sourceRepo, llmClient, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(sourceRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(sourceSessionRepo, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("tenant-source-0x0"), sourceSvc)
+	storeTestTenantServices(srv, "tenant-target", targetRepo)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "Is working out now"},
+			{"role": "assistant", "content": "Got it"},
+		},
+		"session_id": "chain-session",
+		"sync":       true,
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	auth := &domain.AuthInfo{
+		AgentName: "chain-agent",
+		Chain: &domain.ChainAuth{
+			ChainID: "chain-a",
+			APIKey:  "chain-key-a",
+			Nodes: []domain.ChainAuthNode{
+				{
+					SpaceChainNode: domain.SpaceChainNode{
+						TenantID: "tenant-source",
+						Position: 0,
+					},
+					ClusterID: "cluster-source",
+				},
+				{
+					SpaceChainNode: domain.SpaceChainNode{
+						TenantID:             "tenant-target",
+						ExternalSpaceID:      "space-target",
+						Position:             1,
+						RoutingPolicyEnabled: true,
+						RoutingPolicyPrompt:  "facts about fitness",
+					},
+					ClusterID: "cluster-target",
+				},
+			},
+		},
+	}
+	req = req.WithContext(middleware.WithAuthContext(req.Context(), auth))
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !sourceSessionRepo.bulkCreateCalled {
+		t.Fatal("expected source raw session BulkCreate to run")
+	}
+	if len(sourceRepo.createCalls) != 0 {
+		t.Fatalf("source created insights = %d, want 0", len(sourceRepo.createCalls))
+	}
+	if len(targetRepo.createCalls) != 0 {
+		t.Fatalf("target created insights = %d, want 0", len(targetRepo.createCalls))
+	}
+}
+
+func TestCreateMemory_SyncMessages_ServerDisableSessionSaveSkipsRawSession(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts":[{"text":"User prefers coffee","tags":["preference"]}],"message_tags":[["preference"],[]]}`,
+				}},
+			},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default()).
+		WithDisableSessionSave(true)
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(memRepo, llmClient, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(sessRepo, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("db-0x0"), svc)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "I prefer coffee"},
+			{"role": "assistant", "content": "Noted"},
+		},
+		"session_id": "test-session",
+		"sync":       true,
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if sessRepo.bulkCreateCalled {
+		t.Fatal("did not expect raw session BulkCreate when server disables session save")
+	}
+	if sessRepo.patchTagsCalled {
+		t.Fatal("did not expect session PatchTags when server disables session save")
+	}
+	if len(memRepo.createCalls) != 1 {
+		t.Fatalf("expected one extracted fact memory, got %d", len(memRepo.createCalls))
+	}
+}
+
+func TestCreateMemory_SyncMessages_RecordsIngestMetering(t *testing.T) {
+	memRepo := &testMemoryRepo{countStatsTotal: 126}
+	meteringWriter := &captureMeteringWriter{}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithMetering(meteringWriter)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "hello"},
+			{"role": "assistant", "content": "hi there"},
+		},
+		"session_id": "test-session",
+		"sync":       true,
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	events := waitForMeteringEvents(t, meteringWriter, 1, time.Second)
+	if events[0].Category != meteringCategoryAPI {
+		t.Fatalf("event category = %q, want %q", events[0].Category, meteringCategoryAPI)
+	}
+	if events[0].TenantID != "tenant-a" || events[0].ClusterID != "10006636" {
+		t.Fatalf("unexpected event identity: %+v", events[0])
+	}
+	if got := events[0].Data["event_type"]; got != "ingest" {
+		t.Fatalf("event_type = %v, want ingest", got)
+	}
+	if got := events[0].Data["active_memory_count"]; got != int64(126) {
+		t.Fatalf("active_memory_count = %v, want 126", got)
+	}
+}
+
+func TestCreateMemory_SyncMessages_WaitsForMeteringBeforeReturning(t *testing.T) {
+	memRepo := &testMemoryRepo{countStatsTotal: 126}
+	blockingWriter := &blockingMeteringWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithMetering(blockingWriter)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "hello"},
+			{"role": "assistant", "content": "hi there"},
+		},
+		"session_id": "test-session",
+		"sync":       true,
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+
+	go func() {
+		srv.createMemory(rr, req)
+		close(done)
+	}()
+
+	select {
+	case <-blockingWriter.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for sync ingest metering to start")
+	}
+
+	select {
+	case <-done:
+		t.Fatal("sync createMemory returned before metering Record completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(blockingWriter.release)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for createMemory to return after metering completed")
+	}
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -324,6 +3263,851 @@ func TestCreateMemory_AsyncMessages_Returns202(t *testing.T) {
 	}
 }
 
+func TestCreateMemory_AsyncMessagesValidatesExternalProvenanceBeforeAcceptance(t *testing.T) {
+	validEnvelope := func(sourceMessageID string) map[string]any {
+		return map[string]any{
+			"external_provenance": map[string]any{
+				"schema":            "agent9/message-source@1",
+				"source_message_id": sourceMessageID,
+			},
+		}
+	}
+	defaultMessages := []map[string]string{
+		{"role": "user", "content": "hello"},
+		{"role": "assistant", "content": "hi"},
+	}
+	tests := []struct {
+		name       string
+		messages   []map[string]string
+		content    string
+		metadata   any
+		wantStatus int
+	}{
+		{name: "legacy metadata", messages: defaultMessages, metadata: map[string]any{"source": "legacy"}, wantStatus: http.StatusAccepted},
+		{name: "exact envelope", messages: defaultMessages, metadata: validEnvelope(strings.Repeat("🙂", 64)), wantStatus: http.StatusAccepted},
+		{name: "opaque id is not normalized", messages: defaultMessages, metadata: validEnvelope(" Message-ID "), wantStatus: http.StatusAccepted},
+		{name: "unknown schema", messages: defaultMessages, metadata: map[string]any{"external_provenance": map[string]any{"schema": "agent9/message-source@2", "source_message_id": "message_user"}}, wantStatus: http.StatusBadRequest},
+		{name: "missing member", messages: defaultMessages, metadata: map[string]any{"external_provenance": map[string]any{"schema": "agent9/message-source@1"}}, wantStatus: http.StatusBadRequest},
+		{name: "unexpected member", messages: defaultMessages, metadata: map[string]any{"external_provenance": map[string]any{"schema": "agent9/message-source@1", "source_message_id": "message_user", "session_id": "untrusted"}}, wantStatus: http.StatusBadRequest},
+		{name: "empty id", messages: defaultMessages, metadata: validEnvelope(""), wantStatus: http.StatusBadRequest},
+		{name: "over-limit id", messages: defaultMessages, metadata: validEnvelope(strings.Repeat("x", 65)), wantStatus: http.StatusBadRequest},
+		{name: "multiple user messages", messages: []map[string]string{{"role": "user", "content": "one"}, {"role": "assistant", "content": "context"}, {"role": "user", "content": "two"}}, metadata: validEnvelope("message_user"), wantStatus: http.StatusBadRequest},
+		{name: "content request", content: "hello", metadata: validEnvelope("message_user"), wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{})
+			req := makeRequest(t, http.MethodPost, "/memories", map[string]any{
+				"messages":   tt.messages,
+				"content":    tt.content,
+				"session_id": "test-session",
+				"metadata":   tt.metadata,
+			})
+			rr := httptest.NewRecorder()
+
+			srv.createMemory(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", rr.Code, tt.wantStatus, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestCreateMemory_AsyncMessages_DisableSessionSaveSkipsRawSession(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts":[{"text":"User likes green tea","tags":["preference"]}],"message_tags":[["preference"]]}`,
+				}},
+			},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default())
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(memRepo, llmClient, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(sessRepo, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("db-0x0"), svc)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "I like green tea"},
+		},
+		"session_id":         "test-session",
+		"disableSessionSave": true,
+	}
+	req := makeRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	deadline := time.Now().Add(time.Second)
+	var created int
+	for time.Now().Before(deadline) {
+		memRepo.mu.Lock()
+		created = len(memRepo.createCalls)
+		memRepo.mu.Unlock()
+		if created > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if created != 1 {
+		t.Fatalf("expected one extracted fact memory, got %d", created)
+	}
+
+	sessRepo.mu.Lock()
+	bulkCreateCalled := sessRepo.bulkCreateCalled
+	patchTagsCalled := sessRepo.patchTagsCalled
+	sessRepo.mu.Unlock()
+	if bulkCreateCalled {
+		t.Fatal("did not expect raw session BulkCreate when disableSessionSave=true")
+	}
+	if patchTagsCalled {
+		t.Fatal("did not expect session PatchTags when disableSessionSave=true")
+	}
+}
+
+func TestCreateMemory_AsyncMessages_ReconcileFailed_DoesNotRecordIngestMetering(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": `{"facts":["test fact"],"message_tags":[["tag1"],["tag2"]]}`,
+				}},
+			},
+		})
+	}))
+	defer llmServer.Close()
+
+	llmClient := llm.New(llm.Config{
+		APIKey:  "test-key",
+		BaseURL: llmServer.URL,
+		Model:   "test-model",
+	})
+
+	memRepo := &failSearchMemoryRepo{}
+	meteringWriter := &captureMeteringWriter{}
+	srv := NewServer(nil, nil, "", nil, llmClient, "", false, service.ModeSmart, "", slog.Default()).WithMetering(meteringWriter)
+	svc := resolvedSvc{
+		memory:  service.NewMemoryService(&memRepo.testMemoryRepo, nil, nil, "", service.ModeSmart),
+		ingest:  service.NewIngestService(memRepo, llmClient, nil, "", service.ModeSmart),
+		session: service.NewSessionService(&testSessionRepo{}, nil, ""),
+	}
+	srv.svcCache.Store(tenantSvcKey("tenant-a-0x0"), svc)
+
+	body := map[string]any{
+		"messages": []map[string]string{
+			{"role": "user", "content": "hello"},
+			{"role": "assistant", "content": "hi there"},
+		},
+		"session_id": "test-session",
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories", body)
+	rr := httptest.NewRecorder()
+
+	srv.createMemory(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rr.Code, rr.Body.String())
+	}
+	ensureNoMeteringEvents(t, meteringWriter, 100*time.Millisecond)
+}
+
+func TestBulkCreateMemoriesTriggersPostWriteHooks(t *testing.T) {
+	memRepo := &testMemoryRepo{countStatsTotal: 2}
+	meteringWriter := &captureMeteringWriter{}
+	activityRepo := &handlerActivityTenantRepo{
+		count:   1,
+		touched: make(chan string, 1),
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).
+		WithMetering(meteringWriter).
+		WithActivityTracker(service.NewActivityTracker(activityRepo, slog.Default()))
+
+	body := map[string]any{
+		"memories": []map[string]any{
+			{"content": "bulk memory"},
+		},
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories/bulk", body)
+	rr := httptest.NewRecorder()
+
+	srv.bulkCreateMemories(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if memRepo.bulkCreateCalls != 1 {
+		t.Fatalf("bulk create calls = %d, want 1", memRepo.bulkCreateCalls)
+	}
+	select {
+	case tenantID := <-activityRepo.touched:
+		if tenantID != "tenant-a" {
+			t.Fatalf("activity tenant = %q, want tenant-a", tenantID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for activity touch")
+	}
+	events := waitForMeteringEvents(t, meteringWriter, 1, time.Second)
+	if got := events[0].Data["event_type"]; got != "ingest" {
+		t.Fatalf("event_type = %v, want ingest", got)
+	}
+}
+
+func TestBulkCreateMemories_RuntimeUsageFinalizationFailureFailsClosed(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled:               true,
+		afterCreateSuccessErr: &runtimeusage.UnavailableError{Err: errors.New("console unavailable")},
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"memories": []map[string]any{
+			{"content": "bulk memory"},
+		},
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories/bulk", body)
+	rr := httptest.NewRecorder()
+
+	srv.bulkCreateMemories(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeCreateCalls != 1 {
+		t.Fatalf("BeforeMemoryCreate calls = %d, want 1", runtimeUsage.beforeCreateCalls)
+	}
+	if runtimeUsage.afterCreateFailureCalls != 0 {
+		t.Fatalf("AfterMemoryCreateFailure calls = %d, want 0", runtimeUsage.afterCreateFailureCalls)
+	}
+	if memRepo.bulkCreateCalls != 1 {
+		t.Fatalf("bulk create calls = %d, want 1", memRepo.bulkCreateCalls)
+	}
+}
+
+func TestBulkCreateMemories_RuntimeUsageFinalizationIgnoresRequestCancellation(t *testing.T) {
+	var cancel context.CancelFunc
+	memRepo := &testMemoryRepo{
+		bulkCreateHook: func(context.Context) {
+			cancel()
+		},
+	}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"memories": []map[string]any{
+			{"content": "bulk memory"},
+		},
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories/bulk", body)
+	ctx, cancel := context.WithCancel(req.Context())
+	defer cancel()
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	srv.bulkCreateMemories(rr, req)
+
+	if ctx.Err() != context.Canceled {
+		t.Fatal("request context was not canceled during bulk create")
+	}
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.afterCreateSuccessCalls != 1 {
+		t.Fatalf("AfterMemoryCreateSuccess calls = %d, want 1", runtimeUsage.afterCreateSuccessCalls)
+	}
+	if len(runtimeUsage.createSuccessContextErrs) != 1 || runtimeUsage.createSuccessContextErrs[0] != nil {
+		t.Fatalf("finalization context errors = %+v, want [<nil>]", runtimeUsage.createSuccessContextErrs)
+	}
+}
+
+func TestBulkCreateMemories_ChainRuntimeUsageUsesResolvedNodeSubject(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"memories": []map[string]any{
+			{"content": "bulk memory"},
+		},
+	}
+	req := makeChainRequest(t, http.MethodPost, "/memories/bulk", body)
+	rr := httptest.NewRecorder()
+
+	srv.bulkCreateMemories(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeCreateCalls != 1 || runtimeUsage.afterCreateSuccessCalls != 1 {
+		t.Fatalf("runtime create calls = before:%d success:%d, want 1/1", runtimeUsage.beforeCreateCalls, runtimeUsage.afterCreateSuccessCalls)
+	}
+	if len(runtimeUsage.beforeCreateSubjects) != 1 ||
+		runtimeUsage.beforeCreateSubjects[0].TenantID != "tenant-a" ||
+		runtimeUsage.beforeCreateSubjects[0].ClusterID != "10006636" ||
+		runtimeUsage.beforeCreateSubjects[0].APIKeySubject != "chain-key-a" {
+		t.Fatalf("create subject = %+v, want tenant-a/10006636 with chain-key-a subject", runtimeUsage.beforeCreateSubjects)
+	}
+}
+
+func TestListMemories_RuntimeUsageRecallHandsOffFinalizationBeforeReturning499ForCanceledRequest(t *testing.T) {
+	now := time.Now()
+	var cancelRequest context.CancelFunc
+	finalized := make(chan struct{})
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			cancelRequest()
+			return []domain.Memory{
+				{ID: "m1", Content: `"Under Armour"`, MemoryType: domain.TypePinned, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled: true,
+		afterRecallSuccessHook: func(context.Context) error {
+			close(finalized)
+			return nil
+		},
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	req := makeTenantRequest(t, http.MethodGet, "/memories?q=what%20company%20does%20john%20like&memory_type=pinned&limit=10", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancelRequest = cancel
+	defer cancel()
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if ctx.Err() != context.Canceled {
+		t.Fatal("request context was not canceled during recall")
+	}
+	if rr.Code != statusClientClosedRequest {
+		t.Fatalf("status = %d, want 499: %s", rr.Code, rr.Body.String())
+	}
+	select {
+	case <-finalized:
+	case <-time.After(time.Second):
+		t.Fatal("Recall finalization was not handed off")
+	}
+	if runtimeUsage.afterRecallSuccessCalls != 1 {
+		t.Fatalf("AfterRecallSuccess calls = %d, want 1", runtimeUsage.afterRecallSuccessCalls)
+	}
+	if len(runtimeUsage.recallSuccessContextErrs) != 1 || runtimeUsage.recallSuccessContextErrs[0] != nil {
+		t.Fatalf("recall finalization context errors = %+v, want [<nil>]", runtimeUsage.recallSuccessContextErrs)
+	}
+}
+
+func TestListMemories_RuntimeUsageNoticeAddsTopLevelFields(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `"Under Armour"`, MemoryType: domain.TypePinned, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled:      true,
+		providerID:   runtimeNoticeProviderID,
+		runtimeState: runtimeNoticeTestState(runtimeusage.MeterMemoryRecallRequests),
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	req := makeTenantRequest(t, http.MethodGet, "/memories?q=what%20company%20does%20john%20like&memory_type=pinned&limit=10", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(resp.Message, "mem9 recall has used 82% of included quota") {
+		t.Fatalf("message = %q, want recall quota warning", resp.Message)
+	}
+	if resp.RuntimeState == nil || resp.RuntimeState.ProviderID != runtimeNoticeProviderID {
+		t.Fatalf("runtimeState = %+v, want provider id", resp.RuntimeState)
+	}
+	if runtimeUsage.runtimeStateCalls != 0 {
+		t.Fatalf("RuntimeState calls = %d, want 0", runtimeUsage.runtimeStateCalls)
+	}
+	if runtimeUsage.noticeStateCalls != 1 {
+		t.Fatalf("RuntimeStateForNotice calls = %d, want 1", runtimeUsage.noticeStateCalls)
+	}
+	if len(runtimeUsage.noticeStateSubjects) != 1 || runtimeUsage.noticeStateSubjects[0].APIKeySubject != "tenant-a" {
+		t.Fatalf("notice state subjects = %+v, want tenant-a subject", runtimeUsage.noticeStateSubjects)
+	}
+}
+
+func TestListMemories_RuntimeUsageNoticeSkipsUnofficialProvider(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `"Under Armour"`, MemoryType: domain.TypePinned, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	runtimeUsage := &captureRuntimeUsageManager{
+		enabled:      true,
+		providerID:   "provider-x",
+		runtimeState: runtimeNoticeTestState(runtimeusage.MeterMemoryRecallRequests),
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	req := makeTenantRequest(t, http.MethodGet, "/memories?q=what%20company%20does%20john%20like&memory_type=pinned&limit=10", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Message != "" || resp.RuntimeState != nil {
+		t.Fatalf("notice = message:%q state:%+v, want omitted", resp.Message, resp.RuntimeState)
+	}
+	if runtimeUsage.runtimeStateCalls != 0 {
+		t.Fatalf("RuntimeState calls = %d, want 0", runtimeUsage.runtimeStateCalls)
+	}
+	if runtimeUsage.noticeStateCalls != 0 {
+		t.Fatalf("RuntimeStateForNotice calls = %d, want 0", runtimeUsage.noticeStateCalls)
+	}
+}
+
+func TestListMemories_ChainRuntimeUsageRecallUsesChainAPIKeySubject(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `"Under Armour"`, MemoryType: domain.TypePinned, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	req := makeChainRequest(t, http.MethodGet, "/memories?q=what%20company%20does%20john%20like&memory_type=pinned&limit=10", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeRecallCalls != 1 || runtimeUsage.afterRecallSuccessCalls != 1 {
+		t.Fatalf("runtime recall calls = before:%d success:%d, want 1/1", runtimeUsage.beforeRecallCalls, runtimeUsage.afterRecallSuccessCalls)
+	}
+	if len(runtimeUsage.beforeRecallSubjects) != 1 || runtimeUsage.beforeRecallSubjects[0].APIKeySubject != "chain-key-a" {
+		t.Fatalf("recall subject = %+v, want chain-key-a API key subject", runtimeUsage.beforeRecallSubjects)
+	}
+}
+
+func TestListMemories_ChainStopsAfterHighConfidenceByDefault(t *testing.T) {
+	now := time.Now()
+	calls := 0
+	sessionRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			calls++
+			return []domain.Memory{
+				{ID: "session-memory", Content: "Bosn's timezone is Asia/Shanghai.", MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+	srv.chainRecallStopScore = 0.1
+
+	req := makeChainRequestWithNodes(t, http.MethodGet, "/memories?q=what%20timezone%20does%20Bosn%20use&memory_type=session&limit=10", nil, 2)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("node searches = %d, want 1", calls)
+	}
+}
+
+func TestListMemories_ChainScanAllContinuesPastHighConfidence(t *testing.T) {
+	now := time.Now()
+	var calls atomic.Int32
+	sessionRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			call := calls.Add(1)
+			id := "session-memory-a"
+			if call > 1 {
+				id = "session-memory-b"
+			}
+			return []domain.Memory{
+				{ID: id, Content: "Bosn's timezone is Asia/Shanghai.", MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+	srv.chainRecallStopScore = 0.1
+
+	req := makeChainRequestWithNodes(t, http.MethodGet, "/memories?q=what%20timezone%20does%20Bosn%20use&memory_type=session&limit=10&scanAll=true", nil, 2)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("node searches = %d, want 2", got)
+	}
+}
+
+func TestListMemories_ChainScanAllSearchesNodesConcurrently(t *testing.T) {
+	now := time.Now()
+	var calls atomic.Int32
+	started := make(chan int32, 2)
+	release := make(chan struct{})
+	sessionRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			call := calls.Add(1)
+			started <- call
+			<-release
+			return []domain.Memory{
+				{ID: fmt.Sprintf("session-memory-%d", call), Content: "Bosn's timezone is Asia/Shanghai.", MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+
+	req := makeChainRequestWithNodes(t, http.MethodGet, "/memories?q=what%20timezone%20does%20Bosn%20use&memory_type=session&limit=10&scanAll=true", nil, 2)
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.listMemories(rr, req)
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			close(release)
+			t.Fatalf("node search %d did not start before the first searches were released", i+1)
+		}
+	}
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scanAll request did not finish after releasing node searches")
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("node searches = %d, want 2", got)
+	}
+}
+
+func TestBulkCreateMemories_RuntimeUsageValidatesBeforeQuota(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"memories": []map[string]any{
+			{"content": ""},
+		},
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories/bulk", body)
+	rr := httptest.NewRecorder()
+
+	srv.bulkCreateMemories(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeCreateCalls != 0 {
+		t.Fatalf("BeforeMemoryCreate calls = %d, want 0", runtimeUsage.beforeCreateCalls)
+	}
+	if memRepo.bulkCreateCalls != 0 {
+		t.Fatalf("bulk create calls = %d, want 0", memRepo.bulkCreateCalls)
+	}
+}
+
+func TestBatchDeleteMemories_RuntimeUsageValidatesBeforeQuota(t *testing.T) {
+	memRepo := &testMemoryRepo{}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{
+		"ids": []string{"", ""},
+	}
+	req := makeTenantRequest(t, http.MethodPost, "/memories/delete", body)
+	rr := httptest.NewRecorder()
+
+	srv.batchDeleteMemories(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeDeleteCalls != 0 {
+		t.Fatalf("BeforeMemoryDelete calls = %d, want 0", runtimeUsage.beforeDeleteCalls)
+	}
+	if len(memRepo.bulkSoftDeleteCalls) != 0 {
+		t.Fatalf("bulk soft delete calls = %d, want 0", len(memRepo.bulkSoftDeleteCalls))
+	}
+}
+
+func TestUpdateMemory_RuntimeUsageRecordsUpdate(t *testing.T) {
+	memRepo := &testMemoryRepo{
+		createCalls: []*domain.Memory{
+			{ID: "mem-1", Content: "old", Version: 1},
+		},
+	}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{"content": "new"}
+	req := withURLParam(makeTenantRequest(t, http.MethodPatch, "/memories/mem-1", body), "id", "mem-1")
+	rr := httptest.NewRecorder()
+
+	srv.updateMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeUpdateCalls != 1 || runtimeUsage.afterUpdateSuccessCalls != 1 {
+		t.Fatalf("runtime update calls = before:%d success:%d, want 1/1", runtimeUsage.beforeUpdateCalls, runtimeUsage.afterUpdateSuccessCalls)
+	}
+	if len(runtimeUsage.updateResults) != 1 || len(runtimeUsage.updateResults[0].MemoryIDs) != 1 || runtimeUsage.updateResults[0].MemoryIDs[0] != "mem-1" {
+		t.Fatalf("update results = %+v, want mem-1", runtimeUsage.updateResults)
+	}
+	if runtimeUsage.updateResults[0].ObjectsAffected != 1 {
+		t.Fatalf("objects affected = %d, want 1", runtimeUsage.updateResults[0].ObjectsAffected)
+	}
+}
+
+func TestUpdateMemory_GenericMetadataCannotOverwriteExternalProvenance(t *testing.T) {
+	originalMetadata, err := json.Marshal(map[string]any{
+		"external_provenance": map[string]any{
+			"schema":            service.ExternalProvenanceSchema,
+			"source_message_id": "message_original",
+		},
+		"old": "value",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memRepo := &testMemoryRepo{createCalls: []*domain.Memory{{
+		ID:       "mem-1",
+		Content:  "old",
+		Version:  1,
+		Metadata: originalMetadata,
+	}}}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+
+	body := map[string]any{
+		"metadata": map[string]any{
+			"external_provenance": map[string]any{
+				"schema":            service.ExternalProvenanceSchema,
+				"source_message_id": "message_attacker",
+			},
+			"generic": "updated",
+		},
+	}
+	req := withURLParam(makeTenantRequest(t, http.MethodPatch, "/memories/mem-1", body), "id", "mem-1")
+	rr := httptest.NewRecorder()
+
+	srv.updateMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if len(memRepo.updateCalls) != 1 {
+		t.Fatalf("update calls = %d, want 1", len(memRepo.updateCalls))
+	}
+	var metadata map[string]json.RawMessage
+	if err := json.Unmarshal(memRepo.updateCalls[0].Metadata, &metadata); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	var provenance service.ExternalProvenance
+	if err := json.Unmarshal(metadata["external_provenance"], &provenance); err != nil {
+		t.Fatalf("unmarshal external_provenance: %v", err)
+	}
+	if provenance.SourceMessageID != "message_original" {
+		t.Fatalf("source_message_id = %q, want message_original", provenance.SourceMessageID)
+	}
+	var generic string
+	if err := json.Unmarshal(metadata["generic"], &generic); err != nil || generic != "updated" {
+		t.Fatalf("generic metadata = %q (%v), want updated", generic, err)
+	}
+}
+
+func TestUpdateMemory_ProvenanceBearingMetadataRejectsNonObjectReplacement(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		metadata any
+	}{
+		{name: "null", metadata: nil},
+		{name: "string", metadata: "replacement"},
+		{name: "array", metadata: []any{"replacement"}},
+		{name: "number", metadata: 42},
+		{name: "boolean", metadata: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			originalMetadata := json.RawMessage(`{"external_provenance":{"schema":"agent9/message-source@1","source_message_id":"message_original"},"old":"value"}`)
+			memRepo := &testMemoryRepo{createCalls: []*domain.Memory{{
+				ID:       "mem-1",
+				Content:  "old",
+				Version:  1,
+				Metadata: originalMetadata,
+			}}}
+			srv := newTestServer(memRepo, &testSessionRepo{})
+			req := withURLParam(
+				makeTenantRequest(t, http.MethodPatch, "/memories/mem-1", map[string]any{"metadata": tt.metadata}),
+				"id",
+				"mem-1",
+			)
+			rr := httptest.NewRecorder()
+
+			srv.updateMemory(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rr.Code, rr.Body.String())
+			}
+			if len(memRepo.updateCalls) != 0 {
+				t.Fatalf("update calls = %d, want 0", len(memRepo.updateCalls))
+			}
+		})
+	}
+}
+
+func TestUpdateMemory_ChainRuntimeUsageUsesResolvedNodeSubject(t *testing.T) {
+	memRepo := &testMemoryRepo{
+		createCalls: []*domain.Memory{
+			{ID: "mem-1", Content: "old", Version: 1},
+		},
+	}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{"content": "new"}
+	req := withURLParam(makeChainRequest(t, http.MethodPatch, "/memories/mem-1", body), "id", "mem-1")
+	rr := httptest.NewRecorder()
+
+	srv.updateMemory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeUpdateCalls != 1 || runtimeUsage.afterUpdateSuccessCalls != 1 {
+		t.Fatalf("runtime update calls = before:%d success:%d, want 1/1", runtimeUsage.beforeUpdateCalls, runtimeUsage.afterUpdateSuccessCalls)
+	}
+	if len(runtimeUsage.beforeUpdateSubjects) != 1 ||
+		runtimeUsage.beforeUpdateSubjects[0].TenantID != "tenant-a" ||
+		runtimeUsage.beforeUpdateSubjects[0].ClusterID != "10006636" ||
+		runtimeUsage.beforeUpdateSubjects[0].APIKeySubject != "chain-key-a" {
+		t.Fatalf("update subject = %+v, want tenant-a/10006636 with chain-key-a subject", runtimeUsage.beforeUpdateSubjects)
+	}
+}
+
+func TestDeleteMemory_ChainRuntimeUsageUsesResolvedNodeSubject(t *testing.T) {
+	memRepo := &testMemoryRepo{
+		createCalls: []*domain.Memory{
+			{ID: "mem-1", Content: "old", Version: 1},
+		},
+	}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	req := withURLParam(makeChainRequest(t, http.MethodDelete, "/memories/mem-1", nil), "id", "mem-1")
+	rr := httptest.NewRecorder()
+
+	srv.deleteMemory(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeDeleteCalls != 1 || runtimeUsage.afterDeleteSuccessCalls != 1 {
+		t.Fatalf("runtime delete calls = before:%d success:%d, want 1/1", runtimeUsage.beforeDeleteCalls, runtimeUsage.afterDeleteSuccessCalls)
+	}
+	if len(runtimeUsage.beforeDeleteSubjects) != 1 ||
+		runtimeUsage.beforeDeleteSubjects[0].TenantID != "tenant-a" ||
+		runtimeUsage.beforeDeleteSubjects[0].ClusterID != "10006636" ||
+		runtimeUsage.beforeDeleteSubjects[0].APIKeySubject != "chain-key-a" {
+		t.Fatalf("delete subject = %+v, want tenant-a/10006636 with chain-key-a subject", runtimeUsage.beforeDeleteSubjects)
+	}
+}
+
+func TestBatchDeleteMemories_ChainRuntimeUsageGroupsByResolvedNode(t *testing.T) {
+	memRepo := &testMemoryRepo{
+		createCalls: []*domain.Memory{
+			{ID: "mem-1", Content: "one", Version: 1},
+			{ID: "mem-2", Content: "two", Version: 1},
+		},
+		bulkSoftDeleteResult: 2,
+	}
+	runtimeUsage := &captureRuntimeUsageManager{enabled: true}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithRuntimeUsage(runtimeUsage)
+
+	body := map[string]any{"ids": []string{"mem-1", "mem-2"}}
+	req := makeChainRequest(t, http.MethodPost, "/memories/delete", body)
+	rr := httptest.NewRecorder()
+
+	srv.batchDeleteMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if runtimeUsage.beforeDeleteCalls != 1 || runtimeUsage.afterDeleteSuccessCalls != 1 {
+		t.Fatalf("runtime batch delete calls = before:%d success:%d, want 1/1", runtimeUsage.beforeDeleteCalls, runtimeUsage.afterDeleteSuccessCalls)
+	}
+	if len(runtimeUsage.deleteResults) != 1 || runtimeUsage.deleteResults[0].ObjectsAffected != 2 {
+		t.Fatalf("delete results = %+v, want objectsAffected=2", runtimeUsage.deleteResults)
+	}
+	if len(memRepo.bulkSoftDeleteCalls) != 1 || len(memRepo.bulkSoftDeleteCalls[0]) != 2 {
+		t.Fatalf("bulk delete calls = %+v, want one grouped call with two IDs", memRepo.bulkSoftDeleteCalls)
+	}
+	if len(runtimeUsage.beforeDeleteSubjects) != 1 ||
+		runtimeUsage.beforeDeleteSubjects[0].TenantID != "tenant-a" ||
+		runtimeUsage.beforeDeleteSubjects[0].ClusterID != "10006636" ||
+		runtimeUsage.beforeDeleteSubjects[0].APIKeySubject != "chain-key-a" {
+		t.Fatalf("batch delete subject = %+v, want tenant-a/10006636 with chain-key-a subject", runtimeUsage.beforeDeleteSubjects)
+	}
+}
+
 // failSearchMemoryRepo embeds testMemoryRepo but makes KeywordSearch fail,
 // triggering gatherExistingMemories → reconcile → ReconcilePhase2 Status:"failed".
 type failSearchMemoryRepo struct {
@@ -334,7 +4118,7 @@ func (m *failSearchMemoryRepo) KeywordSearch(context.Context, string, domain.Mem
 	return nil, errors.New("simulated search failure")
 }
 
-func TestCreateMemory_SyncMessages_Phase1Error_FallsBackToSuccess(t *testing.T) {
+func TestCreateMemory_SyncMessages_Phase1ErrorReturnsServerError(t *testing.T) {
 	// Mock LLM that always returns 500.
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -368,8 +4152,8 @@ func TestCreateMemory_SyncMessages_Phase1Error_FallsBackToSuccess(t *testing.T) 
 
 	srv.createMemory(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -493,7 +4277,7 @@ func TestCreateMemory_SyncMessages_ReconcileFailure_Returns500(t *testing.T) {
 	}
 }
 
-func TestCreateMemory_SyncMessages_Timeout_FallsBackToSuccess(t *testing.T) {
+func TestCreateMemory_SyncMessages_TimeoutReturnsGatewayTimeout(t *testing.T) {
 	oldTimeout := syncIngestTimeout
 	syncIngestTimeout = 10 * time.Millisecond
 	defer func() { syncIngestTimeout = oldTimeout }()
@@ -530,8 +4314,8 @@ func TestCreateMemory_SyncMessages_Timeout_FallsBackToSuccess(t *testing.T) {
 
 	srv.createMemory(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -641,6 +4425,476 @@ func TestListMemories_DefaultRecall_PrefersSessionForExactQuery(t *testing.T) {
 	}
 	if resp.Memories[0].Confidence == nil || *resp.Memories[0].Confidence < defaultMixedMinConfidence {
 		t.Fatalf("expected confidence >= %d, got %+v", defaultMixedMinConfidence, resp.Memories[0].Confidence)
+	}
+}
+
+func TestListMemories_DefaultRecall_KeepsPinnedIdentifierSearchHits(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(_ context.Context, _ string, filter domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			switch filter.MemoryType {
+			case string(domain.TypePinned):
+				return []domain.Memory{
+					{
+						ID:         "p1",
+						Content:    "codex-appid-e2e-20260602154502 isolated app B memory",
+						MemoryType: domain.TypePinned,
+						UpdatedAt:  now,
+						State:      domain.StateActive,
+					},
+					{
+						ID:         "p2",
+						Content:    "codex-appid-e2e-20260602154502 isolated app A memory",
+						MemoryType: domain.TypePinned,
+						UpdatedAt:  now.Add(-time.Second),
+						State:      domain.StateActive,
+					},
+					{
+						ID:         "p3",
+						Content:    "codex-appid-e2e-20260602154502 global default memory",
+						MemoryType: domain.TypePinned,
+						UpdatedAt:  now.Add(-2 * time.Second),
+						State:      domain.StateActive,
+					},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+	}
+	srv := newTestServer(memRepo, &testSessionRepo{})
+
+	req := makeRequest(t, http.MethodGet, "/memories?q=codex-appid-e2e-20260602154502&limit=10", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) != 3 {
+		t.Fatalf("expected 3 memories, got %d", len(resp.Memories))
+	}
+	if resp.Memories[0].ID != "p1" {
+		t.Fatalf("expected pinned identifier hit, got %q", resp.Memories[0].ID)
+	}
+	for _, memory := range resp.Memories {
+		if memory.Confidence == nil || *memory.Confidence < defaultPinnedMinConfidence {
+			t.Fatalf("expected pinned confidence >= %d, got %+v for %s", defaultPinnedMinConfidence, memory.Confidence, memory.ID)
+		}
+	}
+}
+
+func TestListMemories_DefaultRecall_RecordsMetering(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(_ context.Context, _ string, filter domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			switch filter.MemoryType {
+			case string(domain.TypePinned):
+				return nil, nil
+			case string(domain.TypeInsight):
+				return []domain.Memory{
+					{ID: "m1", Content: `"Under Armour"`, MemoryType: domain.TypeInsight, UpdatedAt: now, State: domain.StateActive},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+	}
+	meteringWriter := &captureMeteringWriter{}
+	srv := newTestServer(memRepo, &testSessionRepo{}).WithMetering(meteringWriter)
+
+	req := makeTenantRequest(t, http.MethodGet, "/memories?q=what%20company%20does%20john%20like&limit=10", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	events := waitForMeteringEvents(t, meteringWriter, 1, time.Second)
+	if events[0].Category != meteringCategoryAPI {
+		t.Fatalf("event category = %q, want %q", events[0].Category, meteringCategoryAPI)
+	}
+	if events[0].TenantID != "tenant-a" || events[0].ClusterID != "10006636" {
+		t.Fatalf("unexpected event identity: %+v", events[0])
+	}
+	if got := events[0].Data["event_type"]; got != "recall" {
+		t.Fatalf("event_type = %v, want recall", got)
+	}
+	if got := events[0].Data["recall_call_count"]; got != 1 {
+		t.Fatalf("recall_call_count = %v, want 1", got)
+	}
+}
+
+func TestListMemories_DefaultRecall_ExactKeepsComplementaryInsightEvidence(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(_ context.Context, _ string, filter domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			switch filter.MemoryType {
+			case string(domain.TypePinned):
+				return nil, nil
+			case string(domain.TypeInsight):
+				return []domain.Memory{
+					{ID: "m1", Content: `Caroline wants to provide "trans-focused counseling and mental health support".`, MemoryType: domain.TypeInsight, UpdatedAt: now.Add(-90 * time.Minute), State: domain.StateActive},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+	}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "s1", Content: `[date:10:37 am on 27 June, 2023] [speaker:Caroline] Lately, I've been looking into counseling and mental health as a career. I want to help people who have gone through the same things as me.`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What career path has Caroline decided to pursue?")+"&limit=3", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) < 2 {
+		t.Fatalf("expected complementary exact recall to keep at least 2 memories, got %d", len(resp.Memories))
+	}
+
+	ids := map[string]struct{}{}
+	for _, mem := range resp.Memories {
+		ids[mem.ID] = struct{}{}
+	}
+	if _, ok := ids["s1"]; !ok {
+		t.Fatalf("expected session evidence to be retained, got %+v", resp.Memories)
+	}
+	if _, ok := ids["m1"]; !ok {
+		t.Fatalf("expected complementary insight evidence to be retained, got %+v", resp.Memories)
+	}
+	if resp.Memories[0].ID != "s1" {
+		t.Fatalf("expected direct session evidence first for exact query, got %q", resp.Memories[0].ID)
+	}
+}
+
+func TestListMemories_DefaultRecall_PrefersTargetSpeakerForSpeechQuestion(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:12:48 am on 1 February, 2023] [speaker:Gina] I'm so proud of the new store location.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m2", Content: `[date:12:48 am on 1 February, 2023] [speaker:Jon] Way to go, hard work's paying off!`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What did Jon say about Gina's progress with her store?")+"&limit=2", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least one memory")
+	}
+	if resp.Memories[0].ID != "m2" {
+		t.Fatalf("expected target-speaker session first, got %q", resp.Memories[0].ID)
+	}
+}
+
+func TestListMemories_DefaultRecall_DownranksCaptionHeavyNonVisualSessionNoise(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: "[date:1:26 pm on 3 April, 2023] [speaker:Jon] Gina, good luck with your store!\n[image-caption: a photo of a dress with a sign on it that says june bunty]", MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: "[date:12:48 am on 1 February, 2023] [speaker:Jon] Wow, Gina! You found the perfect spot for your store. Way to go, hard work's paying off!", MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What did Jon say about Gina's progress with her store?")+"&limit=2", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least one memory")
+	}
+	if resp.Memories[0].ID != "m2" {
+		t.Fatalf("expected direct spoken session first, got %q", resp.Memories[0].ID)
+	}
+}
+
+func TestListMemories_DefaultRecall_PrefersSubjectSpeakerForPersonalPreferenceQuestion(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:11:41 am on 6 November, 2023] [speaker:John] LeBron's moments of determination and heart are incredible.`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:3:00 pm on 2 October, 2023] [speaker:Tim] The Wolves are solid and LeBron's skills and leadership are amazing.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `[date:3:00 pm on 2 October, 2023] [speaker:Tim] LeBron is incredible. Have you ever had the opportunity to meet him or see him play live?`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What does John like about Lebron James?")+"&limit=3", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least one memory")
+	}
+	if resp.Memories[0].ID != "m1" {
+		t.Fatalf("expected subject speaker answer first, got %q", resp.Memories[0].ID)
+	}
+}
+
+func TestListMemories_DefaultRecall_PrefersSubjectAnswerForResearchQuestion(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:10:31 am on 13 October, 2023] [speaker:Melanie] Hey Caroline! Great to hear from you! Wow, what an amazing journey. Congrats!`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:10:31 am on 13 October, 2023] [speaker:Caroline] I researched adoption agencies and lawyers so I can understand the process better.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `Caroline wants to adopt children and build a family.`, MemoryType: domain.TypeInsight, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What did Caroline research?")+"&limit=3", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least one memory")
+	}
+	if resp.Memories[0].ID != "m2" {
+		t.Fatalf("expected subject research answer first, got %q", resp.Memories[0].ID)
+	}
+}
+
+func TestListMemories_DefaultRecall_PrefersSelfIdentityStatement(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:10:31 am on 13 October, 2023] [speaker:Melanie] That's awesome, Caroline! You drew it? What does it mean to you?`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:10:31 am on 13 October, 2023] [speaker:Caroline] I'm a transgender woman, and that painting is about accepting who I am.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `Caroline volunteers for the LGBTQ+ community.`, MemoryType: domain.TypeInsight, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What is Caroline's identity?")+"&limit=3", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least one memory")
+	}
+	if resp.Memories[0].ID != "m2" {
+		t.Fatalf("expected self-identity statement first, got %q", resp.Memories[0].ID)
+	}
+}
+
+func TestListMemories_DefaultRecall_PrefersRelationshipStatusSelfStatement(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:8:56 pm on 20 July, 2023] [speaker:Melanie] Hey Caroline! Good to talk to you again. What's up? Anything new since last time?`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:8:56 pm on 20 July, 2023] [speaker:Caroline] I'm single right now and focusing on getting ready to adopt.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `Caroline is ready to be a mom and adopt children.`, MemoryType: domain.TypeInsight, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What is Caroline's relationship status?")+"&limit=3", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least one memory")
+	}
+	if resp.Memories[0].ID != "m2" {
+		t.Fatalf("expected relationship-status self statement first, got %q", resp.Memories[0].ID)
+	}
+}
+
+func TestListMemories_DefaultRecall_DemotesNonSubjectPromptForSymbolQuestion(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:10:31 am on 13 October, 2023] [speaker:Melanie] That's awesome, Caroline! You drew it? What does it mean to you?`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:3:31 pm on 23 August, 2023] [speaker:Caroline] Thanks, Melanie. Art gives me a sense of freedom, but so does having supportive people around, promoting LGBTQ rights and being true to myself.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `Caroline views abstract art as a form of self-expression.`, MemoryType: domain.TypeInsight, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What does Caroline's drawing symbolize for her?")+"&limit=3", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least one memory")
+	}
+	if resp.Memories[0].ID != "m2" {
+		t.Fatalf("expected subject answer turn first, got %q", resp.Memories[0].ID)
+	}
+}
+
+func TestListMemories_DefaultRecall_ExpandsAdjacentSessionAnswerTurn(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(_ context.Context, _ string, filter domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			switch filter.MemoryType {
+			case string(domain.TypePinned):
+				return nil, nil
+			case string(domain.TypeInsight):
+				return []domain.Memory{
+					{ID: "m1", Content: "John likes outdoor gear brands.", MemoryType: domain.TypeInsight, UpdatedAt: now.Add(-2 * time.Hour), State: domain.StateActive},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+	}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{
+					ID:         "s-question",
+					SessionID:  "sess-1",
+					Content:    "[speaker:Melanie] Which company do you like the most these days?",
+					MemoryType: domain.TypeSession,
+					Metadata:   json.RawMessage(`{"role":"user","seq":7,"content_type":"text"}`),
+					UpdatedAt:  now,
+					State:      domain.StateActive,
+				},
+			}, nil
+		},
+		sessionListResults: []*domain.Session{
+			{ID: "s-before", SessionID: "sess-1", Seq: 6, Role: "assistant", Content: "I finally replaced my old hiking boots.", ContentType: "text", State: domain.StateActive, CreatedAt: now.Add(-2 * time.Minute), UpdatedAt: now.Add(-2 * time.Minute)},
+			{ID: "s-question", SessionID: "sess-1", Seq: 7, Role: "user", Content: "Which company do you like the most these days?", ContentType: "text", State: domain.StateActive, CreatedAt: now.Add(-1 * time.Minute), UpdatedAt: now.Add(-1 * time.Minute)},
+			{ID: "s-answer", SessionID: "sess-1", Seq: 8, Role: "assistant", Content: `Definitely "Under Armour" right now.`, ContentType: "text", State: domain.StateActive, CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What company does John like?")+"&limit=3", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatal("expected at least one memory")
+	}
+	if resp.Memories[0].ID != "s-answer" {
+		t.Fatalf("expected adjacent session answer first, got %q", resp.Memories[0].ID)
+	}
+	if resp.Memories[0].Confidence == nil || *resp.Memories[0].Confidence < defaultMixedMinConfidence {
+		t.Fatalf("expected adjacent answer confidence >= %d, got %+v", defaultMixedMinConfidence, resp.Memories[0].Confidence)
+	}
+	if len(sessRepo.lastSessionIDs) != 1 || sessRepo.lastSessionIDs[0] != "sess-1" {
+		t.Fatalf("expected adjacent expansion to inspect sess-1, got %+v", sessRepo.lastSessionIDs)
 	}
 }
 
@@ -876,6 +5130,300 @@ func TestListMemories_DefaultRecall_EnumerationFiltersLowConfidenceNoise(t *test
 	}
 }
 
+func TestClassifyRecallQueryShape_ExpandedEnumerationQueries(t *testing.T) {
+	tests := []struct {
+		query string
+		want  recallQueryShape
+	}{
+		{query: "What instruments does Melanie play?", want: recallQueryShapeEnumeration},
+		{query: "What are John's goals for his career?", want: recallQueryShapeEnumeration},
+		{query: "In what ways is Caroline participating in the LGBTQ community?", want: recallQueryShapeEnumeration},
+		{query: "How many times has Melanie gone to the beach in 2023?", want: recallQueryShapeEnumeration},
+	}
+
+	for _, tt := range tests {
+		if got := classifyRecallQueryShape(tt.query); got != tt.want {
+			t.Fatalf("classifyRecallQueryShape(%q) = %v, want %v", tt.query, got, tt.want)
+		}
+	}
+}
+
+func TestListMemories_DefaultRecall_EnumerationPrefersFocusMatchedMemories(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:6:55 pm on 20 October, 2023] [speaker:Melanie] Our camping trip got off to a bad start and the whole family was shaken up.`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:9:55 am on 22 October, 2023] [speaker:Melanie] These figurines I bought yesterday remind me of family love.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `[date:11:54 am on 2 May, 2023] [speaker:Melanie] I bought a new pair of hiking shoes last week and they already feel broken in.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("What items has Melanie bought?")+"&limit=2", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) < 2 {
+		t.Fatalf("expected at least 2 memories, got %d", len(resp.Memories))
+	}
+
+	got := map[string]struct{}{
+		resp.Memories[0].ID: {},
+		resp.Memories[1].ID: {},
+	}
+	if _, ok := got["m2"]; !ok {
+		t.Fatalf("expected figurines memory in top 2, got %+v", resp.Memories[:2])
+	}
+	if _, ok := got["m3"]; !ok {
+		t.Fatalf("expected shoes memory in top 2, got %+v", resp.Memories[:2])
+	}
+}
+
+func TestListMemories_DefaultRecall_RepeatCountIncludesConcreteEvents(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:8:56 pm on 20 July, 2023] [speaker:Melanie] Seeing my kids' faces so happy at the beach was the best! We don't go often, usually only once or twice a year.`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:8:56 pm on 20 July, 2023] [speaker:Melanie] We went to the beach recently and the kids had such a blast.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `[date:1:33 pm on 25 August, 2023] [speaker:Melanie] We spent the afternoon at the beach again and I loved how peaceful it felt.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("How many times has Melanie gone to the beach in 2023?")+"&limit=2", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) < 3 {
+		t.Fatalf("expected expanded repeat-count recall to return at least 3 memories, got %d", len(resp.Memories))
+	}
+
+	got := map[string]struct{}{}
+	for _, mem := range resp.Memories {
+		got[mem.ID] = struct{}{}
+	}
+	if _, ok := got["m2"]; !ok {
+		t.Fatalf("expected first beach event memory in returned set, got %+v", resp.Memories)
+	}
+	if _, ok := got["m3"]; !ok {
+		t.Fatalf("expected second beach event memory in returned set, got %+v", resp.Memories)
+	}
+}
+
+func TestListMemories_DefaultRecall_DurationPrefersExactSpanMemory(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:5:33 pm on 26 August, 2023] [speaker:Jolene] I've been into yoga lately and it helps me recharge.`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:7:18 pm on 2 March, 2023] [speaker:Jolene] I've been doing yoga for 3 years now and it keeps me grounded.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `[date:7:39 pm on 8 September, 2023] [speaker:Jolene] Since February 2023, yoga has been part of my routine.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("How long has Jolene been doing yoga?")+"&limit=2", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatalf("expected memories, got none")
+	}
+	if resp.Memories[0].ID != "m2" {
+		t.Fatalf("expected exact duration memory first, got %+v", resp.Memories)
+	}
+}
+
+func TestListMemories_DefaultRecall_FrequencyPrefersCadenceOverDuration(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:5:23 pm on 13 June, 2023] [speaker:Audrey] I take my dogs for walks multiple times a day.`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:5:23 pm on 13 June, 2023] [speaker:Audrey] We usually walk for about an hour and let them explore.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+				{ID: "m3", Content: `[date:7:09 pm on 1 October, 2023] [speaker:Audrey] Taking the dogs out for a walk in the park helps clear my mind.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-2 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("How often does Audrey take her dogs for walks?")+"&limit=2", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatalf("expected memories, got none")
+	}
+	if resp.Memories[0].ID != "m1" {
+		t.Fatalf("expected explicit cadence memory first, got %+v", resp.Memories)
+	}
+}
+
+func TestListMemories_DefaultRecall_DurationDemotesQuestionTurns(t *testing.T) {
+	now := time.Now()
+	memRepo := &testMemoryRepo{}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			return []domain.Memory{
+				{ID: "m1", Content: `[date:7:55 pm on 9 June, 2023] [speaker:Caroline] Wow, what an amazing family pic! How long have you been married?`, MemoryType: domain.TypeSession, UpdatedAt: now, State: domain.StateActive},
+				{ID: "m2", Content: `[date:7:55 pm on 9 June, 2023] [speaker:Melanie] We've been married for 5 years now.`, MemoryType: domain.TypeSession, UpdatedAt: now.Add(-1 * time.Minute), State: domain.StateActive},
+			}, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+
+	req := makeRequest(t, http.MethodGet, "/memories?q="+url.QueryEscape("How long have Mel and her husband been married?")+"&limit=2", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp listResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Memories) == 0 {
+		t.Fatalf("expected memories, got none")
+	}
+	if resp.Memories[0].ID != "m2" {
+		t.Fatalf("expected direct duration answer first, got %+v", resp.Memories)
+	}
+}
+
+func TestDefaultConfidenceRecallSearch_FansOutPoolSearchesConcurrently(t *testing.T) {
+	release := make(chan struct{})
+	allStarted := make(chan struct{})
+	var (
+		mu          sync.Mutex
+		started     int
+		inFlight    int
+		maxInFlight int
+	)
+
+	enter := func(ctx context.Context) error {
+		mu.Lock()
+		started++
+		inFlight++
+		if inFlight > maxInFlight {
+			maxInFlight = inFlight
+		}
+		if started == 3 {
+			close(allStarted)
+		}
+		mu.Unlock()
+
+		defer func() {
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+		}()
+
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	memRepo := &testMemoryRepo{
+		keywordSearchHook: func(ctx context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			if err := enter(ctx); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		},
+	}
+	sessRepo := &testSessionRepo{
+		keywordSearchHook: func(ctx context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
+			if err := enter(ctx); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		},
+	}
+	srv := newTestServer(memRepo, sessRepo)
+	auth := &domain.AuthInfo{ClusterID: "cluster-a"}
+	svc := srv.resolveServices(auth)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		select {
+		case <-allStarted:
+			close(release)
+		case <-ctx.Done():
+		}
+	}()
+
+	if _, _, err := srv.defaultConfidenceRecallSearch(ctx, auth, svc, domain.MemoryFilter{
+		Query: "tell me about john",
+		Limit: 10,
+	}); err != nil {
+		t.Fatalf("expected concurrent recall fan-out to complete, got %v", err)
+	}
+
+	mu.Lock()
+	gotStarted := started
+	gotMaxInFlight := maxInFlight
+	mu.Unlock()
+
+	if gotStarted != 3 {
+		t.Fatalf("expected 3 pool searches to start, got %d", gotStarted)
+	}
+	if gotMaxInFlight != 3 {
+		t.Fatalf("expected all 3 pool searches to overlap, max_in_flight=%d", gotMaxInFlight)
+	}
+}
+
 func TestListMemories_DefaultRecall_PrefersSessionForChineseExactQuery(t *testing.T) {
 	now := time.Now()
 	memRepo := &testMemoryRepo{
@@ -1076,5 +5624,58 @@ func TestListMemories_SinglePoolRecall_NormalizesChineseRelativeQuery(t *testing
 	}
 	if sessRepo.lastKeywordFilter.Query != expected {
 		t.Fatalf("session filter query = %q, want %q", sessRepo.lastKeywordFilter.Query, expected)
+	}
+}
+
+func TestListMemories_TimeRangePropagatesToSessionFilter(t *testing.T) {
+	sessionRepo := &testSessionRepo{
+		listResults: []domain.Memory{{
+			ID: "sess-row-1", Content: "raw turn", MemoryType: domain.TypeSession,
+			State: domain.StateActive, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		}},
+		listTotal: 1,
+	}
+	srv := newTestServer(&testMemoryRepo{}, sessionRepo)
+	req := makeRequest(t, http.MethodGet,
+		"/memories?memory_type=session&created_after=2026-06-01T00:00:00Z&created_before=2026-06-30T23:59:59Z", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	f := sessionRepo.lastListFilter
+	if f.CreatedAfter == nil || !f.CreatedAfter.Equal(time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("CreatedAfter = %v, want 2026-06-01T00:00:00Z", f.CreatedAfter)
+	}
+	if f.CreatedBefore == nil || !f.CreatedBefore.Equal(time.Date(2026, 6, 30, 23, 59, 59, 0, time.UTC)) {
+		t.Fatalf("CreatedBefore = %v, want 2026-06-30T23:59:59Z", f.CreatedBefore)
+	}
+}
+
+func TestListMemories_TimeRangeRequiresSessionType(t *testing.T) {
+	// The window is session-only; passing it without memory_type=session
+	// must 400 rather than silently apply mixed-pool semantics.
+	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{})
+	req := makeRequest(t, http.MethodGet, "/memories?created_after=2026-06-01T00:00:00Z", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestListMemories_RejectsMalformedTimeParam(t *testing.T) {
+	srv := newTestServer(&testMemoryRepo{}, &testSessionRepo{})
+	req := makeRequest(t, http.MethodGet, "/memories?memory_type=session&created_after=2026-06-01", nil)
+	rr := httptest.NewRecorder()
+
+	srv.listMemories(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 on non-RFC3339: %s", rr.Code, rr.Body.String())
 	}
 }

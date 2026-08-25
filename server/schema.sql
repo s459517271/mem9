@@ -24,6 +24,64 @@ CREATE TABLE IF NOT EXISTS tenants (
   INDEX idx_tenant_provider (provider)
 );
 
+CREATE TABLE IF NOT EXISTS tenant_activity (
+  tenant_id                  VARCHAR(36) NOT NULL PRIMARY KEY,
+  last_activity_at           TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  active_memory_total        BIGINT      NOT NULL DEFAULT 0,
+  active_memory_7d_total     BIGINT      NOT NULL DEFAULT 0,
+  memory_stats_observed_at   TIMESTAMP   NULL,
+  CONSTRAINT fk_tenant_activity FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+  INDEX idx_tenant_activity_last_activity (last_activity_at)
+);
+
+CREATE TABLE IF NOT EXISTS space_chains (
+  id                  VARCHAR(36)   PRIMARY KEY,
+  project_id          VARCHAR(255)  NULL,
+  name                VARCHAR(255)  NOT NULL,
+  description         TEXT          NULL,
+  created_by_user_id  VARCHAR(255)  NULL,
+  deleted_at          TIMESTAMP     NULL,
+  deleted_by_user_id  VARCHAR(255)  NULL,
+  created_at          TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_space_chains_project (project_id),
+  INDEX idx_space_chains_deleted (deleted_at)
+);
+
+CREATE TABLE IF NOT EXISTS space_chain_bindings (
+  id                  VARCHAR(36)   PRIMARY KEY,
+  chain_id            VARCHAR(36)   NOT NULL,
+  chain_api_key       VARCHAR(255)  NOT NULL,
+  created_by_user_id  VARCHAR(255)  NULL,
+  disabled            TINYINT(1)    NOT NULL DEFAULT 0,
+  disabled_at         TIMESTAMP     NULL,
+  disabled_by_user_id VARCHAR(255)  NULL,
+  created_at          TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE INDEX idx_space_chain_bindings_key (chain_api_key),
+  INDEX idx_space_chain_bindings_chain (chain_id),
+  CONSTRAINT fk_space_chain_bindings_chain FOREIGN KEY (chain_id) REFERENCES space_chains(id)
+);
+
+CREATE TABLE IF NOT EXISTS space_chain_nodes (
+  id                  VARCHAR(36)   PRIMARY KEY,
+  chain_id            VARCHAR(36)   NOT NULL,
+  tenant_id           VARCHAR(36)   NOT NULL,
+  external_space_id   VARCHAR(255)  NULL,
+  display_name        VARCHAR(255)  NULL,
+  position            INT           NOT NULL,
+  routing_policy_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  routing_policy_prompt  TEXT       NULL,
+  routing_policy_webhook_only TINYINT(1) NOT NULL DEFAULT 0,
+  created_at          TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE INDEX idx_space_chain_nodes_tenant (chain_id, tenant_id),
+  UNIQUE INDEX idx_space_chain_nodes_external_space (chain_id, external_space_id),
+  UNIQUE INDEX idx_space_chain_nodes_position (chain_id, position),
+  INDEX idx_space_chain_nodes_external_lookup (external_space_id),
+  CONSTRAINT fk_space_chain_nodes_chain FOREIGN KEY (chain_id) REFERENCES space_chains(id),
+  CONSTRAINT fk_space_chain_nodes_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+);
+
 -- Tenant data plane schema (per-tenant TiDB Serverless).
 CREATE TABLE IF NOT EXISTS memories (
   id              VARCHAR(36)     PRIMARY KEY,
@@ -40,6 +98,7 @@ CREATE TABLE IF NOT EXISTS memories (
   -- Agent & session tracking
   agent_id        VARCHAR(100)    NULL     COMMENT 'Agent that created this memory',
   session_id      VARCHAR(100)    NULL     COMMENT 'Session this memory originated from',
+  app_id          VARCHAR(100)    NOT NULL DEFAULT '' COMMENT 'Application isolation ID',
 
   -- Lifecycle
   state           VARCHAR(20)     NOT NULL DEFAULT 'active'
@@ -54,6 +113,7 @@ CREATE TABLE IF NOT EXISTS memories (
   INDEX idx_state               (state),
   INDEX idx_agent               (agent_id),
   INDEX idx_session             (session_id),
+  INDEX idx_app                 (app_id),
   INDEX idx_updated             (updated_at)
 );
 
@@ -87,12 +147,14 @@ CREATE TABLE IF NOT EXISTS memories (
 --   ADD COLUMN memory_type  VARCHAR(20) NOT NULL DEFAULT 'pinned',
 --   ADD COLUMN agent_id     VARCHAR(100) NULL,
 --   ADD COLUMN session_id   VARCHAR(100) NULL,
+--   ADD COLUMN app_id       VARCHAR(100) NOT NULL DEFAULT '',
 --   ADD COLUMN state        VARCHAR(20) NOT NULL DEFAULT 'active',
 --   ADD COLUMN superseded_by VARCHAR(36) NULL;
 -- CREATE INDEX idx_memory_type ON memories(memory_type);
 -- CREATE INDEX idx_state ON memories(state);
 -- CREATE INDEX idx_agent ON memories(agent_id);
 -- CREATE INDEX idx_session ON memories(session_id);
+-- CREATE INDEX idx_app ON memories(app_id);
 -- Step 2: Migrate tombstoned records.
 -- UPDATE memories SET state = 'deleted', deleted_at = updated_at WHERE tombstone = 1;
 -- Step 3: Add constraint (AFTER code migration).
@@ -100,6 +162,32 @@ CREATE TABLE IF NOT EXISTS memories (
 -- Step 4: Drop tombstone (separate deployment).
 -- ALTER TABLE memories DROP COLUMN tombstone;
 -- DROP INDEX idx_tombstone ON memories;
+
+-- Raw-session edit overlay (tenant data plane). Display-only: an edit only
+-- changes how Session Search renders an already-matched row; the sessions
+-- table, its embedding, and its FTS index are never modified, so retrieval
+-- and memory/fact recall are unaffected. Current-overlay, not history: one
+-- row per session turn (id == sessions.id), upserted in place on re-edit.
+CREATE TABLE IF NOT EXISTS session_edits (
+  id               VARCHAR(36)     PRIMARY KEY COMMENT 'Equals sessions.id',
+  app_id           VARCHAR(100)    NOT NULL DEFAULT '',
+  session_id       VARCHAR(100)    NULL,
+  seq              INT             NULL,
+  agent_id         VARCHAR(100)    NULL,
+  original_content MEDIUMTEXT      NOT NULL COMMENT 'Pre-edit snapshot (before)',
+  edited_content   MEDIUMTEXT      NOT NULL COMMENT 'Post-edit content (after)',
+  edited_tags      JSON            NULL     COMMENT 'NULL = no tag override; non-NULL (incl. []) overrides',
+  edited_by        VARCHAR(100)    NULL,
+  reason           VARCHAR(500)    NULL,
+  version          INT             NOT NULL DEFAULT 1,
+  state            VARCHAR(20)     NOT NULL DEFAULT 'active'
+                   COMMENT 'active|reverted',
+  created_at       TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_sedit_session       (session_id),
+  INDEX idx_sedit_app           (app_id),
+  INDEX idx_sedit_state         (state)
+);
 
 -- Marketing attribution captured at provision time (control plane).
 CREATE TABLE IF NOT EXISTS tenant_utm (
@@ -130,4 +218,66 @@ CREATE TABLE IF NOT EXISTS upload_tasks (
   updated_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_upload_tenant (tenant_id),
   INDEX idx_upload_poll (status, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_usage_outbox (
+  operation_id      VARCHAR(36) PRIMARY KEY,
+  tenant_id         VARCHAR(36) NOT NULL,
+  cluster_id        VARCHAR(255) NULL,
+  subject_version   VARCHAR(32) NOT NULL DEFAULT 'tenant_id_v1',
+  step              VARCHAR(32) NOT NULL,
+  phase             VARCHAR(32) NOT NULL,
+  payload_json      JSON        NOT NULL,
+  payload_hash      VARCHAR(64) NOT NULL,
+  expires_at        TIMESTAMP   NULL,
+  status            VARCHAR(20) NOT NULL DEFAULT 'pending',
+  attempt_count     INT         NOT NULL DEFAULT 0,
+  next_attempt_at   TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_error        TEXT        NULL,
+  created_at        TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+  updated_at        TIMESTAMP   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_runtime_usage_outbox_poll (status, next_attempt_at)
+);
+
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  id                VARCHAR(36)  PRIMARY KEY,
+  scope_type        VARCHAR(20)  NOT NULL,
+  scope_id          VARCHAR(255) NOT NULL,
+  name              VARCHAR(255) NOT NULL,
+  url               TEXT         NOT NULL,
+  enabled           TINYINT(1)   NOT NULL DEFAULT 1,
+  events_json       JSON         NOT NULL,
+  secret_ciphertext TEXT         NOT NULL,
+  created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at        TIMESTAMP    NULL,
+  INDEX idx_webhook_endpoints_scope (scope_type, scope_id, deleted_at)
+);
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id           VARCHAR(36)  PRIMARY KEY,
+  scope_type   VARCHAR(20)  NOT NULL,
+  scope_id     VARCHAR(255) NOT NULL,
+  event_type   VARCHAR(100) NOT NULL,
+  payload_json JSON         NOT NULL,
+  created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_webhook_events_scope (scope_type, scope_id, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id               VARCHAR(36) PRIMARY KEY,
+  event_id         VARCHAR(36) NOT NULL,
+  endpoint_id      VARCHAR(36) NOT NULL,
+  status           VARCHAR(20) NOT NULL DEFAULT 'pending',
+  attempt_count    INT         NOT NULL DEFAULT 0,
+  next_attempt_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_http_status INT         NULL,
+  last_error       TEXT        NULL,
+  delivered_at     TIMESTAMP   NULL,
+  created_at       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_webhook_deliveries_poll (status, next_attempt_at),
+  INDEX idx_webhook_deliveries_event (event_id),
+  CONSTRAINT fk_webhook_deliveries_event FOREIGN KEY (event_id) REFERENCES webhook_events(id),
+  CONSTRAINT fk_webhook_deliveries_endpoint FOREIGN KEY (endpoint_id) REFERENCES webhook_endpoints(id)
 );

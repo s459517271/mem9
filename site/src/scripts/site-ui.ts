@@ -1,4 +1,3 @@
-import { docsCopy, resolveDocsLocale } from '../content/docs';
 import {
   DEFAULT_LOCALE,
   DEFAULT_THEME_PREFERENCE,
@@ -13,15 +12,16 @@ import {
   type SiteResolvedTheme,
   type SiteThemePreference,
 } from '../content/site';
+import { copyText } from './clipboard';
 
-type MenuName = 'language' | 'theme';
+type MenuName = 'docs' | 'login' | 'language' | 'theme' | 'mobile';
+type DocsLocale = 'en' | 'zh' | 'ja' | 'ko' | 'id' | 'th';
 type OnboardingVersion = 'stable' | 'beta';
 type OnboardingCommandParts = {
   prefix: string;
   url: string | null;
   suffix: string;
 };
-
 const ONBOARDING_COMMAND_URL_PATTERN = /https:\/\/\S+/u;
 const PUBLIC_SKILL_ORIGIN = 'https://mem9.ai';
 const PUBLIC_SKILL_URLS = [
@@ -29,7 +29,6 @@ const PUBLIC_SKILL_URLS = [
   'https://mem9.ai/beta/SKILL.md',
 ];
 const TRACKED_SKILL_PATHS = new Set(['/SKILL.md', '/beta/SKILL.md']);
-
 function getValue(dictionary: SiteDictionary, path: string): unknown {
   return path.split('.').reduce<unknown>((current, segment) => {
     if (current === null || current === undefined) {
@@ -385,7 +384,12 @@ function updateTranslations(dictionary: SiteDictionary): void {
       return;
     }
 
-    element.textContent = textFor(dictionary, key);
+    const value = textFor(dictionary, key);
+    if (element.dataset.i18nHtml !== undefined) {
+      element.innerHTML = value;
+    } else {
+      element.textContent = value;
+    }
   });
 
   document.querySelectorAll<HTMLElement>('[data-i18n-attr]').forEach((element) => {
@@ -411,6 +415,10 @@ function updateTranslations(dictionary: SiteDictionary): void {
     }
 
     element.dataset.copyText = textFor(dictionary, copyKey);
+  });
+
+  document.querySelectorAll<HTMLElement>('[data-page-markdown-copy]').forEach((button) => {
+    button.classList.remove('is-copied', 'is-error');
   });
 
   document.querySelectorAll<HTMLButtonElement>('[data-set-locale]').forEach((button) => {
@@ -489,10 +497,64 @@ function isApiPage(): boolean {
   return document.querySelector('[data-api-root]') !== null;
 }
 
+function isReleaseNotesPage(): boolean {
+  return document.querySelector('[data-release-notes-root]') !== null;
+}
+
+function resolveDocsLocale(locale: SiteLocale): DocsLocale {
+  switch (locale) {
+    case 'zh':
+    case 'zh-Hant':
+      return 'zh';
+    case 'ja':
+      return 'ja';
+    case 'ko':
+      return 'ko';
+    case 'id':
+      return 'id';
+    case 'th':
+      return 'th';
+    case 'en':
+    default:
+      return 'en';
+  }
+}
+
+function findActiveDocsHashTarget(root: HTMLElement): HTMLElement | null {
+  const hash = window.location.hash.slice(1);
+  if (!hash) {
+    return null;
+  }
+
+  const activeCopy = root.querySelector<HTMLElement>('[data-docs-copy]:not([hidden])');
+  return Array.from(activeCopy?.querySelectorAll<HTMLElement>('[data-docs-anchor]') ?? [])
+    .find((anchor) => anchor.dataset.docsAnchor === hash) ?? null;
+}
+
+function scheduleDocsHashScroll(root: HTMLElement): void {
+  if (!window.location.hash) {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    findActiveDocsHashTarget(root)?.scrollIntoView({ block: 'start', behavior: 'auto' });
+    window.requestAnimationFrame(() => {
+      findActiveDocsHashTarget(root)?.scrollIntoView({ block: 'start', behavior: 'auto' });
+    });
+  });
+
+  window.setTimeout(() => {
+    findActiveDocsHashTarget(root)?.scrollIntoView({ block: 'start', behavior: 'auto' });
+  }, 120);
+
+  window.setTimeout(() => {
+    findActiveDocsHashTarget(root)?.scrollIntoView({ block: 'start', behavior: 'auto' });
+  }, 450);
+}
+
 function updateDocsPage(locale: SiteLocale): void {
   const docsLocale = resolveDocsLocale(locale);
   const root = document.querySelector<HTMLElement>('[data-docs-root]');
-  const copy = docsCopy[docsLocale];
 
   if (!root) {
     return;
@@ -500,9 +562,8 @@ function updateDocsPage(locale: SiteLocale): void {
 
   root.dataset.docsLocale = docsLocale;
   setDocumentLang(locale);
-  updateMetaElements(copy.meta.title, copy.meta.description);
 
-  document.querySelectorAll<HTMLElement>('[data-docs-copy]').forEach((sectionCopy) => {
+  root.querySelectorAll<HTMLElement>('[data-docs-copy]').forEach((sectionCopy) => {
     const isActive = sectionCopy.dataset.docsCopy === docsLocale;
     sectionCopy.hidden = !isActive;
 
@@ -520,6 +581,18 @@ function updateDocsPage(locale: SiteLocale): void {
       anchor.removeAttribute('id');
     });
   });
+
+  const activeCopy = root.querySelector<HTMLElement>('[data-docs-copy]:not([hidden])');
+  if (activeCopy) {
+    updateMetaElements(activeCopy.dataset.docsMetaTitle ?? '', activeCopy.dataset.docsMetaDescription ?? '');
+
+    const backToTopButton = root.querySelector<HTMLButtonElement>('[data-docs-back-to-top]');
+    if (backToTopButton && activeCopy.dataset.docsBackToTopLabel) {
+      backToTopButton.setAttribute('aria-label', activeCopy.dataset.docsBackToTopLabel);
+    }
+  }
+
+  scheduleDocsHashScroll(root);
 }
 
 function updateApiPage(locale: SiteLocale): void {
@@ -554,6 +627,23 @@ function updateApiPage(locale: SiteLocale): void {
   });
 }
 
+function updateReleaseNotesPage(locale: SiteLocale): void {
+  const root = document.querySelector<HTMLElement>('[data-release-notes-root]');
+  const copy = siteCopy[locale].releaseNotesPage;
+
+  if (!root) {
+    return;
+  }
+
+  root.dataset.releaseNotesLocale = locale;
+  setDocumentLang(locale);
+  updateMetaElements(copy.meta.title, copy.meta.description);
+
+  document.querySelectorAll<HTMLElement>('[data-release-notes-copy]').forEach((sectionCopy) => {
+    sectionCopy.hidden = sectionCopy.dataset.releaseNotesCopy !== locale;
+  });
+}
+
 function updateFaqSection(locale: SiteLocale): void {
   const root = document.querySelector<HTMLElement>('[data-faq-root]');
 
@@ -577,6 +667,9 @@ function applyLocale(locale: SiteLocale): void {
   } else if (isApiPage()) {
     updateTranslations(dictionary);
     updateApiPage(locale);
+  } else if (isReleaseNotesPage()) {
+    updateTranslations(dictionary);
+    updateReleaseNotesPage(locale);
   } else {
     updateMeta(locale, dictionary);
     updateTranslations(dictionary);
@@ -600,31 +693,6 @@ function applyLocale(locale: SiteLocale): void {
   }
 }
 
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', '');
-    textarea.style.position = 'absolute';
-    textarea.style.left = '-9999px';
-    document.body.appendChild(textarea);
-    textarea.select();
-
-    let copied = false;
-    try {
-      copied = document.execCommand('copy');
-    } catch {
-      copied = false;
-    }
-
-    document.body.removeChild(textarea);
-    return copied;
-  }
-}
-
 function initMenuControls(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-menu-trigger]').forEach((trigger) => {
     trigger.addEventListener('click', () => {
@@ -637,6 +705,12 @@ function initMenuControls(): void {
 
       const isOpen = shell.dataset.open === 'true';
       setOpenMenu(isOpen ? null : menuName);
+    });
+  });
+
+  document.querySelectorAll<HTMLAnchorElement>('[data-menu="mobile"] a').forEach((link) => {
+    link.addEventListener('click', () => {
+      setOpenMenu(null);
     });
   });
 
@@ -763,6 +837,81 @@ function initOnboardingVersionControls(): void {
   });
 
   applyOnboardingVersion('stable');
+}
+
+function normalizeDocsTocQuery(value: string): string[] {
+  return value
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function initDocsTocSearch(): void {
+  const root = document.querySelector<HTMLElement>('[data-docs-root]');
+  if (!root) {
+    return;
+  }
+
+  function applyFilter(sectionCopy: HTMLElement): void {
+    const input = sectionCopy.querySelector<HTMLInputElement>('[data-docs-toc-search]');
+    const empty = sectionCopy.querySelector<HTMLElement>('[data-docs-toc-empty]');
+    if (!input || !empty) {
+      return;
+    }
+
+    const tokens = normalizeDocsTocQuery(input.value);
+    const hasQuery = tokens.length > 0;
+    let visibleGroups = 0;
+
+    sectionCopy.querySelectorAll<HTMLDetailsElement>('[data-docs-toc-group]').forEach((group) => {
+      const groupHaystack = (group.dataset.docsSearch ?? '').toLowerCase();
+      const groupMatches = hasQuery && tokens.every((token) => groupHaystack.includes(token));
+      let visibleSections = 0;
+
+      group.querySelectorAll<HTMLElement>('[data-docs-toc-section]').forEach((section) => {
+        const sectionHaystack = (section.dataset.docsSearch ?? '').toLowerCase();
+        const sectionMatches = !hasQuery || groupMatches || tokens.every((token) => sectionHaystack.includes(token));
+        section.hidden = !sectionMatches;
+        if (sectionMatches) {
+          visibleSections++;
+        }
+      });
+
+      const showGroup = !hasQuery || groupMatches || visibleSections > 0;
+      group.hidden = !showGroup;
+      if (showGroup && hasQuery) {
+        group.open = true;
+      }
+      if (showGroup) {
+        visibleGroups++;
+      }
+    });
+
+    empty.hidden = !hasQuery || visibleGroups > 0;
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-docs-copy]').forEach((sectionCopy) => {
+    const input = sectionCopy.querySelector<HTMLInputElement>('[data-docs-toc-search]');
+    if (!input) {
+      return;
+    }
+
+    input.addEventListener('input', () => applyFilter(sectionCopy));
+    applyFilter(sectionCopy);
+  });
+
+  const mutation = new MutationObserver(() => {
+    const activeCopy = root.querySelector<HTMLElement>('[data-docs-copy]:not([hidden])');
+    if (activeCopy) {
+      applyFilter(activeCopy);
+    }
+  });
+
+  mutation.observe(root, {
+    attributes: true,
+    attributeFilter: ['data-docs-locale'],
+  });
 }
 
 function initDocsScrollSpy(): void {
@@ -963,7 +1112,7 @@ function initApiScrollSpy(): void {
       observer.disconnect();
     }
 
-    const activeCopy = root!.querySelector<HTMLElement>('[data-api-copy]:not([hidden])');
+    const activeCopy = root!.querySelector<HTMLElement>('[data-api-copy]:not([hidden]) [data-api-catalog]:not([hidden])');
     if (!activeCopy) {
       return;
     }
@@ -1029,6 +1178,29 @@ function initApiScrollSpy(): void {
     attributes: true,
     attributeFilter: ['data-api-locale'],
   });
+
+  root.addEventListener('api-product-change', setup);
+}
+
+function initApiProductTabs(): void {
+  const root = document.querySelector<HTMLElement>('[data-api-root]');
+  if (!root) return;
+
+  root.querySelectorAll<HTMLButtonElement>('[data-api-product-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const product = button.dataset.apiProductTab;
+      if (!product) return;
+
+      root.querySelectorAll<HTMLElement>('[data-api-catalog]').forEach((catalog) => {
+        catalog.hidden = catalog.dataset.apiCatalog !== product;
+      });
+      root.querySelectorAll<HTMLButtonElement>('[data-api-product-tab]').forEach((tab) => {
+        tab.setAttribute('aria-selected', String(tab.dataset.apiProductTab === product));
+      });
+      root.dispatchEvent(new CustomEvent('api-product-change'));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
 }
 
 function initApiMobileToc(): void {
@@ -1058,6 +1230,959 @@ function initApiMobileToc(): void {
   });
 }
 
+function normalizeApiTocQuery(value: string): string[] {
+  return value
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function initApiTocSearch(): void {
+  const root = document.querySelector<HTMLElement>('[data-api-root]');
+  if (!root) {
+    return;
+  }
+
+  function setGroupExpanded(group: HTMLElement, expanded: boolean): void {
+    const toggle = group.querySelector<HTMLButtonElement>('[data-api-toc-group-toggle]');
+    const sublist = group.querySelector<HTMLElement>('[data-api-toc-sublist]');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+    if (sublist) {
+      sublist.hidden = !expanded;
+    }
+  }
+
+  function applyFilter(sectionCopy: HTMLElement): void {
+    const input = sectionCopy.querySelector<HTMLInputElement>('[data-api-toc-search]');
+    const empty = sectionCopy.querySelector<HTMLElement>('[data-api-toc-empty]');
+    if (!input || !empty) {
+      return;
+    }
+
+    const tokens = normalizeApiTocQuery(input.value);
+    const hasQuery = tokens.length > 0;
+    let visibleGroups = 0;
+
+    sectionCopy.querySelectorAll<HTMLElement>('[data-api-toc-static]').forEach((item) => {
+      item.hidden = hasQuery;
+    });
+
+    sectionCopy.querySelectorAll<HTMLElement>('[data-api-toc-group]').forEach((group) => {
+      const groupHaystack = (group.dataset.apiSearch ?? '').toLowerCase();
+      const groupMatches = hasQuery && tokens.every((token) => groupHaystack.includes(token));
+      let visibleEndpoints = 0;
+      const toggle = group.querySelector<HTMLButtonElement>('[data-api-toc-group-toggle]');
+
+      group.querySelectorAll<HTMLElement>('[data-api-toc-endpoint]').forEach((endpoint) => {
+        const endpointHaystack = (endpoint.dataset.apiSearch ?? '').toLowerCase();
+        const endpointMatches = !hasQuery || groupMatches || tokens.every((token) => endpointHaystack.includes(token));
+        endpoint.hidden = !endpointMatches;
+        if (endpointMatches) {
+          visibleEndpoints++;
+        }
+      });
+
+      const showGroup = !hasQuery || groupMatches || visibleEndpoints > 0;
+      group.hidden = !showGroup;
+      setGroupExpanded(group, showGroup && (!hasQuery || visibleEndpoints > 0));
+      if (showGroup) {
+        visibleGroups++;
+      }
+    });
+
+    empty.hidden = !hasQuery || visibleGroups > 0;
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-api-catalog]').forEach((sectionCopy) => {
+    const input = sectionCopy.querySelector<HTMLInputElement>('[data-api-toc-search]');
+    if (!input) {
+      return;
+    }
+    input.addEventListener('input', () => applyFilter(sectionCopy));
+    applyFilter(sectionCopy);
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-api-toc-group-toggle]').forEach((toggle) => {
+    toggle.addEventListener('click', () => {
+      const group = toggle.closest<HTMLElement>('[data-api-toc-group]');
+      const sectionCopy = toggle.closest<HTMLElement>('[data-api-catalog]');
+      const input = sectionCopy?.querySelector<HTMLInputElement>('[data-api-toc-search]');
+      if (!group || (input && input.value.trim() !== '')) {
+        return;
+      }
+      const expanded = toggle.getAttribute('aria-expanded') === 'true';
+      setGroupExpanded(group, !expanded);
+    });
+  });
+
+  const mutation = new MutationObserver(() => {
+    const activeCopy = root.querySelector<HTMLElement>('[data-api-copy]:not([hidden]) [data-api-catalog]:not([hidden])');
+    if (activeCopy) {
+      applyFilter(activeCopy);
+    }
+  });
+
+  mutation.observe(root, {
+    attributes: true,
+    attributeFilter: ['data-api-locale'],
+  });
+}
+
+type ApiTestField = {
+  name: string;
+  description: string;
+  required: boolean;
+};
+
+type ApiTestEndpoint = {
+  groupTitle: string;
+  testBaseUrl: string;
+  requestBasePath: string;
+  method: string;
+  path: string;
+  summary: string;
+  description: string;
+  headers: ApiTestField[];
+  queryParams: ApiTestField[];
+  bodyFields: ApiTestField[];
+};
+
+type ApiTestModalElements = {
+  modal: HTMLElement;
+  form: HTMLFormElement;
+  title: HTMLElement;
+  method: HTMLElement;
+  path: HTMLElement;
+  baseUrl: HTMLInputElement;
+  saveInfo: HTMLInputElement;
+  pathFields: HTMLElement;
+  headerFields: HTMLElement;
+  queryFields: HTMLElement;
+  bodyFields: HTMLElement;
+  jsonWrap: HTMLElement;
+  json: HTMLTextAreaElement;
+  url: HTMLElement;
+  response: HTMLElement;
+  status: HTMLElement;
+  output: HTMLElement;
+  run: HTMLButtonElement;
+};
+
+type ApiTestSavedForm = {
+  baseUrl: string;
+  path: Record<string, string>;
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  body: Record<string, string>;
+  json: string;
+};
+
+const API_TEST_STORAGE_PREFIX = 'mem9.apiTestForm.';
+const API_TEST_SAVE_INFO_STORAGE_KEY = 'mem9.apiTestSaveInfo';
+let activeApiTestEndpoint: ApiTestEndpoint | null = null;
+
+function apiTestLabels(): SiteDictionary['apiPage']['labels'] {
+  return siteCopy[currentLocale()].apiPage.labels;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseApiTestField(value: unknown): ApiTestField | null {
+  if (!isRecord(value) || typeof value.name !== 'string') {
+    return null;
+  }
+
+  return {
+    name: value.name,
+    description: typeof value.description === 'string' ? value.description : '',
+    required: value.required === true,
+  };
+}
+
+function parseApiTestFields(value: unknown): ApiTestField[] {
+  return Array.isArray(value)
+    ? value.map(parseApiTestField).filter((field): field is ApiTestField => field !== null)
+    : [];
+}
+
+function parseApiTestEndpoint(value: string | undefined): ApiTestEndpoint | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.method !== 'string' ||
+      typeof parsed.path !== 'string' ||
+      typeof parsed.summary !== 'string'
+    ) {
+      return null;
+    }
+
+    return {
+      groupTitle: typeof parsed.groupTitle === 'string' ? parsed.groupTitle : '',
+      testBaseUrl: typeof parsed.testBaseUrl === 'string' ? parsed.testBaseUrl : '',
+      requestBasePath: typeof parsed.requestBasePath === 'string' ? parsed.requestBasePath : '',
+      method: parsed.method.toUpperCase(),
+      path: parsed.path,
+      summary: parsed.summary,
+      description: typeof parsed.description === 'string' ? parsed.description : '',
+      headers: parseApiTestFields(parsed.headers),
+      queryParams: parseApiTestFields(parsed.queryParams),
+      bodyFields: parseApiTestFields(parsed.bodyFields),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getApiTestModalElements(): ApiTestModalElements | null {
+  const modal = document.querySelector<HTMLElement>('[data-api-test-modal]');
+  const form = document.querySelector<HTMLFormElement>('[data-api-test-form]');
+  const title = document.querySelector<HTMLElement>('[data-api-test-title]');
+  const method = document.querySelector<HTMLElement>('[data-api-test-method]');
+  const path = document.querySelector<HTMLElement>('[data-api-test-path]');
+  const baseUrl = document.querySelector<HTMLInputElement>('[data-api-test-base-url]');
+  const saveInfo = document.querySelector<HTMLInputElement>('[data-api-test-save-info]');
+  const pathFields = document.querySelector<HTMLElement>('[data-api-test-path-fields]');
+  const headerFields = document.querySelector<HTMLElement>('[data-api-test-header-fields]');
+  const queryFields = document.querySelector<HTMLElement>('[data-api-test-query-fields]');
+  const bodyFields = document.querySelector<HTMLElement>('[data-api-test-body-fields]');
+  const jsonWrap = document.querySelector<HTMLElement>('[data-api-test-json-wrap]');
+  const json = document.querySelector<HTMLTextAreaElement>('[data-api-test-json]');
+  const url = document.querySelector<HTMLElement>('[data-api-test-url]');
+  const response = document.querySelector<HTMLElement>('[data-api-test-response]');
+  const status = document.querySelector<HTMLElement>('[data-api-test-status]');
+  const output = document.querySelector<HTMLElement>('[data-api-test-output]');
+  const run = document.querySelector<HTMLButtonElement>('[data-api-test-run]');
+
+  if (
+    !modal ||
+    !form ||
+    !title ||
+    !method ||
+    !path ||
+    !baseUrl ||
+    !saveInfo ||
+    !pathFields ||
+    !headerFields ||
+    !queryFields ||
+    !bodyFields ||
+    !jsonWrap ||
+    !json ||
+    !url ||
+    !response ||
+    !status ||
+    !output ||
+    !run
+  ) {
+    return null;
+  }
+
+  return {
+    modal,
+    form,
+    title,
+    method,
+    path,
+    baseUrl,
+    saveInfo,
+    pathFields,
+    headerFields,
+    queryFields,
+    bodyFields,
+    jsonWrap,
+    json,
+    url,
+    response,
+    status,
+    output,
+    run,
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function highlightJson(value: string): string {
+  return value.replace(
+    /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+    (match, stringToken: string | undefined, colon: string | undefined, booleanToken: string | undefined) => {
+      if (stringToken) {
+        const className = colon ? 'api-json-key' : 'api-json-string';
+        return `<span class="${className}">${escapeHtml(stringToken)}</span>${colon ?? ''}`;
+      }
+
+      if (booleanToken) {
+        return `<span class="api-json-boolean">${match}</span>`;
+      }
+
+      if (match === 'null') {
+        return '<span class="api-json-null">null</span>';
+      }
+
+      return `<span class="api-json-number">${match}</span>`;
+    },
+  );
+}
+
+function formatApiTestOutput(text: string): string {
+  if (text.trim() === '') {
+    return `<span class="api-json-null">(${escapeHtml(apiTestLabels().emptyResponse)})</span>`;
+  }
+
+  try {
+    return highlightJson(JSON.stringify(JSON.parse(text) as unknown, null, 2));
+  } catch {
+    return escapeHtml(text);
+  }
+}
+
+function apiTestInputValue(fieldName: string): unknown {
+  const lowerName = fieldName.toLowerCase();
+
+  if (lowerName.endsWith('daterange.start') || lowerName.endsWith('createdat')) {
+    return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  if (lowerName.endsWith('daterange.end')) {
+    return new Date().toISOString();
+  }
+
+  if (lowerName.includes('expectedtotalmemories') || lowerName.includes('expectedtotalbatches') || lowerName.endsWith('batchsize') || lowerName.endsWith('memorycount')) {
+    return 1;
+  }
+
+  if (lowerName.endsWith('llmenabled') || lowerName.endsWith('includeitems') || lowerName.endsWith('includesummary')) {
+    return true;
+  }
+
+  if (lowerName.endsWith('taxonomyversion')) {
+    return 'v3';
+  }
+
+  if (lowerName.endsWith('.lang') || lowerName === 'lang') {
+    return 'en';
+  }
+
+  if (lowerName.includes('limit')) {
+    return 10;
+  }
+
+  if (lowerName.includes('offset')) {
+    return 0;
+  }
+
+  if (lowerName.includes('scanall')) {
+    return false;
+  }
+
+  if (lowerName.includes('tags') || lowerName.includes('ids') || lowerName.includes('nodes')) {
+    return [];
+  }
+
+  if (lowerName.includes('metadata')) {
+    return {};
+  }
+
+  if (lowerName.includes('messages')) {
+    return [{ role: 'user', content: 'Hello mem9' }];
+  }
+
+  if (lowerName.includes('content')) {
+    return 'Example memory content';
+  }
+
+  if (lowerName.includes('memory_type')) {
+    return 'pinned';
+  }
+
+  if (lowerName.includes('app')) {
+    return null;
+  }
+
+  return '';
+}
+
+function setApiTestJsonValue(body: Record<string, unknown>, fieldName: string, value: unknown): void {
+  const segments = fieldName.split('.').filter(Boolean);
+  let current = body;
+
+  segments.forEach((rawSegment, index) => {
+    const isArray = rawSegment.endsWith('[]');
+    const key = isArray ? rawSegment.slice(0, -2) : rawSegment;
+    if (key === '' || ['__proto__', 'prototype', 'constructor'].includes(key)) {
+      return;
+    }
+
+    const isLast = index === segments.length - 1;
+    if (isLast) {
+      current[key] = isArray && !Array.isArray(value) ? [value] : value;
+      return;
+    }
+
+    if (isArray) {
+      const existing = current[key];
+      if (!Array.isArray(existing) || !isRecord(existing[0])) {
+        current[key] = [{}];
+      }
+      current = (current[key] as Array<Record<string, unknown>>)[0];
+      return;
+    }
+
+    if (!isRecord(current[key])) {
+      current[key] = {};
+    }
+    current = current[key] as Record<string, unknown>;
+  });
+}
+
+function buildApiTestJsonTemplate(fields: ApiTestField[]): string {
+  const body = fields.reduce<Record<string, unknown>>((current, field) => {
+    setApiTestJsonValue(current, field.name, apiTestInputValue(field.name));
+    return current;
+  }, {});
+
+  return JSON.stringify(body, null, 2);
+}
+
+function isApiTestMultipart(endpoint: ApiTestEndpoint): boolean {
+  return endpoint.headers.some((field) => field.name.toLowerCase() === 'content-type' && field.description.toLowerCase().includes('multipart'));
+}
+
+function extractApiTestPathParams(path: string): ApiTestField[] {
+  const labels = apiTestLabels();
+  return Array.from(path.matchAll(/\{([^}]+)\}/g)).map((match) => ({
+    name: match[1] ?? '',
+    description: labels.pathParameter,
+    required: true,
+  }));
+}
+
+function setApiTestSectionVisibility(container: HTMLElement, visible: boolean): void {
+  const section = container.closest<HTMLElement>('[data-api-test-section]');
+  if (section) {
+    section.hidden = !visible;
+  }
+}
+
+function createApiTestInput(container: HTMLElement, scope: string, field: ApiTestField, type = 'text'): HTMLInputElement {
+  const label = document.createElement('label');
+  label.className = 'api-test-control';
+
+  const labelText = document.createElement('span');
+  labelText.className = 'api-test-label-line';
+
+  const labelName = document.createElement('span');
+  labelName.className = 'api-test-label-name';
+  labelName.textContent = field.name;
+  labelText.append(labelName);
+
+  if (field.required) {
+    const labels = apiTestLabels();
+    const requiredMark = document.createElement('span');
+    requiredMark.className = 'api-test-required-mark';
+    requiredMark.textContent = '*';
+    requiredMark.setAttribute('aria-label', labels.required);
+    labelText.append(requiredMark);
+  }
+
+  const input = document.createElement('input');
+  input.type = type;
+  input.autocomplete = 'off';
+  input.dataset.apiTestScope = scope;
+  input.dataset.apiTestName = field.name;
+  if (field.required && type !== 'file') {
+    input.required = true;
+  }
+
+  if (field.name.toLowerCase() === 'content-type') {
+    input.value = field.description.toLowerCase().includes('multipart') ? 'multipart/form-data' : 'application/json';
+  }
+
+  label.append(labelText, input);
+
+  if (field.description) {
+    const help = document.createElement('p');
+    help.className = 'api-test-help';
+    help.textContent = field.description;
+    label.append(help);
+  }
+
+  container.append(label);
+  return input;
+}
+
+function renderApiTestFields(container: HTMLElement, scope: string, fields: ApiTestField[], multipart = false): void {
+  container.replaceChildren();
+  fields.forEach((field) => {
+    const type = multipart && field.name.toLowerCase() === 'file' ? 'file' : 'text';
+    createApiTestInput(container, scope, field, type);
+  });
+  setApiTestSectionVisibility(container, fields.length > 0);
+}
+
+function readApiTestTextInputs(scope: string): Array<{ name: string; value: string }> {
+  return Array.from(document.querySelectorAll<HTMLInputElement>(`[data-api-test-scope="${scope}"]`))
+    .filter((input) => input.type !== 'file')
+    .map((input) => ({
+      name: input.dataset.apiTestName ?? '',
+      value: input.value.trim(),
+    }))
+    .filter((entry) => entry.name !== '');
+}
+
+function apiTestStorageKey(endpoint: ApiTestEndpoint): string {
+  return `${API_TEST_STORAGE_PREFIX}${encodeURIComponent(`${endpoint.method}:${endpoint.path}`)}`;
+}
+
+function readApiTestSaveInfoPreference(): boolean {
+  try {
+    return localStorage.getItem(API_TEST_SAVE_INFO_STORAGE_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+function writeApiTestSaveInfoPreference(enabled: boolean): void {
+  try {
+    localStorage.setItem(API_TEST_SAVE_INFO_STORAGE_KEY, enabled ? 'true' : 'false');
+  } catch {
+    // Ignore storage quota or privacy-mode failures.
+  }
+}
+
+function isApiTestApiKeyName(name: string): boolean {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '').includes('apikey');
+}
+
+function collectApiTestSavedInputs(scope: string): Record<string, string> {
+  return Array.from(document.querySelectorAll<HTMLInputElement>(`[data-api-test-scope="${scope}"]`))
+    .filter((input) => input.type !== 'file')
+    .reduce<Record<string, string>>((saved, input) => {
+      const name = input.dataset.apiTestName ?? '';
+      if (name === '' || isApiTestApiKeyName(name)) {
+        return saved;
+      }
+
+      saved[name] = input.value;
+      return saved;
+    }, {});
+}
+
+function applyApiTestSavedInputs(scope: string, saved: Record<string, string>): void {
+  document.querySelectorAll<HTMLInputElement>(`[data-api-test-scope="${scope}"]`).forEach((input) => {
+    const name = input.dataset.apiTestName ?? '';
+    if (name === '' || isApiTestApiKeyName(name) || !(name in saved)) {
+      return;
+    }
+
+    input.value = saved[name] ?? '';
+  });
+}
+
+function sanitizeApiTestJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeApiTestJsonValue);
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return Object.entries(value).reduce<Record<string, unknown>>((sanitized, [key, nestedValue]) => {
+    if (!isApiTestApiKeyName(key)) {
+      sanitized[key] = sanitizeApiTestJsonValue(nestedValue);
+    }
+    return sanitized;
+  }, {});
+}
+
+function sanitizeApiTestJsonText(text: string): string {
+  if (text.trim() === '') {
+    return '';
+  }
+
+  try {
+    return JSON.stringify(sanitizeApiTestJsonValue(JSON.parse(text) as unknown), null, 2);
+  } catch {
+    return '';
+  }
+}
+
+function parseApiTestStringRecord(value: unknown): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.entries(value).reduce<Record<string, string>>((record, [key, nestedValue]) => {
+    if (typeof nestedValue === 'string' && !isApiTestApiKeyName(key)) {
+      record[key] = nestedValue;
+    }
+    return record;
+  }, {});
+}
+
+function readApiTestSavedForm(endpoint: ApiTestEndpoint): ApiTestSavedForm | null {
+  try {
+    const raw = localStorage.getItem(apiTestStorageKey(endpoint));
+    if (!raw) {
+      return null;
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    return {
+      baseUrl: typeof parsed.baseUrl === 'string' ? parsed.baseUrl : '',
+      path: parseApiTestStringRecord(parsed.path),
+      headers: parseApiTestStringRecord(parsed.headers),
+      query: parseApiTestStringRecord(parsed.query),
+      body: parseApiTestStringRecord(parsed.body),
+      json: typeof parsed.json === 'string' ? sanitizeApiTestJsonText(parsed.json) : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function collectApiTestSavedForm(elements: ApiTestModalElements): ApiTestSavedForm {
+  return {
+    baseUrl: elements.baseUrl.value,
+    path: collectApiTestSavedInputs('path'),
+    headers: collectApiTestSavedInputs('headers'),
+    query: collectApiTestSavedInputs('query'),
+    body: collectApiTestSavedInputs('body'),
+    json: elements.jsonWrap.hidden ? '' : sanitizeApiTestJsonText(elements.json.value),
+  };
+}
+
+function saveApiTestForm(elements: ApiTestModalElements): void {
+  if (!activeApiTestEndpoint || !elements.saveInfo.checked) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(
+      apiTestStorageKey(activeApiTestEndpoint),
+      JSON.stringify(collectApiTestSavedForm(elements)),
+    );
+  } catch {
+    // Ignore storage quota or privacy-mode failures.
+  }
+}
+
+function clearApiTestSavedForm(endpoint: ApiTestEndpoint): void {
+  try {
+    localStorage.removeItem(apiTestStorageKey(endpoint));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearApiTestSavedForms(): void {
+  try {
+    const keysToRemove: string[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(API_TEST_STORAGE_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function restoreApiTestSavedForm(elements: ApiTestModalElements, endpoint: ApiTestEndpoint): void {
+  if (!elements.saveInfo.checked) {
+    return;
+  }
+
+  const saved = readApiTestSavedForm(endpoint);
+  if (!saved) {
+    return;
+  }
+
+  const savedBaseUrl = saved.baseUrl.trim();
+  const isOldYourMemoryProxyUrl = endpoint.requestBasePath !== ''
+    && (savedBaseUrl === '/your-memory/analysis-api'
+      || savedBaseUrl === 'https://mem9.ai/your-memory/analysis-api');
+  if (savedBaseUrl !== '' && !isOldYourMemoryProxyUrl) {
+    elements.baseUrl.value = saved.baseUrl;
+  }
+
+  applyApiTestSavedInputs('path', saved.path);
+  applyApiTestSavedInputs('headers', saved.headers);
+  applyApiTestSavedInputs('query', saved.query);
+  applyApiTestSavedInputs('body', saved.body);
+  if (!elements.jsonWrap.hidden && saved.json.trim() !== '') {
+    elements.json.value = saved.json;
+  }
+}
+
+function buildApiTestUrl(elements: ApiTestModalElements, endpoint: ApiTestEndpoint): URL {
+  const base = elements.baseUrl.value.trim().replace(/\/+$/u, '');
+  const baseUrl = base === '' ? defaultApiTestBaseUrl(endpoint) : base;
+  const enteredUrl = new URL(baseUrl, window.location.origin);
+  const absoluteBaseUrl = new URL(`${baseUrl}/`, window.location.origin);
+  const resolvedPath = endpoint.path.replace(/\{([^}]+)\}/g, (match, name: string) => {
+    const input = Array.from(document.querySelectorAll<HTMLInputElement>('[data-api-test-scope="path"]'))
+      .find((candidate) => candidate.dataset.apiTestName === name);
+    const value = input?.value.trim() ?? '';
+    return value === '' ? match : encodeURIComponent(value);
+  });
+  const normalizedResolvedPath = `/${resolvedPath.replace(/^\/+|\/+$/gu, '')}`;
+  const normalizedBasePath = absoluteBaseUrl.pathname.replace(/\/+$/u, '') || '/';
+  const baseAlreadyIncludesEndpoint = normalizedBasePath === normalizedResolvedPath
+    || normalizedBasePath.endsWith(normalizedResolvedPath);
+  const url = baseAlreadyIncludesEndpoint
+    ? enteredUrl
+    : new URL(resolvedPath.replace(/^\/+/, ''), absoluteBaseUrl);
+
+  readApiTestTextInputs('query').forEach(({ name, value }) => {
+    if (value !== '') {
+      url.searchParams.append(name, value);
+    }
+  });
+
+  return url;
+}
+
+function buildApiTestRequestUrl(displayUrl: URL, endpoint: ApiTestEndpoint): URL {
+  if (endpoint.requestBasePath === '') {
+    return displayUrl;
+  }
+
+  const siteOrigin = window.location.origin.replace(/\/+$/u, '');
+  const requestBasePath = endpoint.requestBasePath.replace(/^\/+|\/+$/gu, '');
+  const displayBaseUrl = endpoint.testBaseUrl.replace(/\/+$/u, '');
+  const displayUrlText = displayUrl.toString();
+  const requestBaseUrl = `${siteOrigin}/${requestBasePath}`;
+
+  if (displayUrlText.startsWith(displayBaseUrl)) {
+    return new URL(`${requestBaseUrl}${displayUrlText.slice(displayBaseUrl.length)}`);
+  }
+
+  return displayUrl;
+}
+
+function defaultApiTestBaseUrl(endpoint?: ApiTestEndpoint): string {
+  if (endpoint?.testBaseUrl) {
+    return endpoint.testBaseUrl;
+  }
+  return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(window.location.hostname)
+    ? 'http://localhost:8081'
+    : 'https://api.mem9.ai';
+}
+
+function updateApiTestUrlPreview(elements: ApiTestModalElements): void {
+  if (!activeApiTestEndpoint) {
+    return;
+  }
+
+  try {
+    elements.url.textContent = buildApiTestUrl(elements, activeApiTestEndpoint).toString();
+  } catch (error) {
+    elements.url.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function openApiTestModal(elements: ApiTestModalElements, endpoint: ApiTestEndpoint): void {
+  const multipart = isApiTestMultipart(endpoint);
+  const labels = apiTestLabels();
+  activeApiTestEndpoint = endpoint;
+  elements.baseUrl.value = defaultApiTestBaseUrl(endpoint);
+  elements.title.textContent = endpoint.summary;
+  elements.method.textContent = `${endpoint.method} · ${endpoint.groupTitle}`;
+  elements.path.textContent = endpoint.path;
+  elements.response.hidden = false;
+  elements.status.textContent = labels.ready;
+  elements.output.textContent = labels.responseReady;
+  renderApiTestFields(elements.pathFields, 'path', extractApiTestPathParams(endpoint.path));
+  renderApiTestFields(elements.headerFields, 'headers', endpoint.headers);
+  renderApiTestFields(elements.queryFields, 'query', endpoint.queryParams);
+  renderApiTestFields(elements.bodyFields, 'body', multipart ? endpoint.bodyFields : [], multipart);
+  elements.jsonWrap.hidden = multipart || endpoint.bodyFields.length === 0;
+  elements.json.value = multipart || endpoint.bodyFields.length === 0 ? '' : buildApiTestJsonTemplate(endpoint.bodyFields);
+  setApiTestSectionVisibility(elements.bodyFields, endpoint.bodyFields.length > 0);
+  restoreApiTestSavedForm(elements, endpoint);
+  updateApiTestUrlPreview(elements);
+
+  elements.modal.hidden = false;
+  window.requestAnimationFrame(() => {
+    elements.modal.classList.add('is-visible');
+    elements.baseUrl.focus();
+  });
+}
+
+function closeApiTestModal(elements: ApiTestModalElements): void {
+  elements.modal.classList.remove('is-visible');
+  window.setTimeout(() => {
+    elements.modal.hidden = true;
+  }, 180);
+}
+
+async function runApiTest(elements: ApiTestModalElements): Promise<void> {
+  if (!activeApiTestEndpoint) {
+    return;
+  }
+
+  const labels = apiTestLabels();
+  const endpoint = activeApiTestEndpoint;
+  const multipart = isApiTestMultipart(endpoint);
+  const headers = new Headers();
+  readApiTestTextInputs('headers').forEach(({ name, value }) => {
+    if (value === '') {
+      return;
+    }
+    if (multipart && name.toLowerCase() === 'content-type') {
+      return;
+    }
+    headers.set(name, value);
+  });
+
+  let body: BodyInit | undefined;
+  if (multipart) {
+    const formData = new FormData();
+    document.querySelectorAll<HTMLInputElement>('[data-api-test-scope="body"]').forEach((input) => {
+      const name = input.dataset.apiTestName ?? '';
+      if (name === '') {
+        return;
+      }
+      if (input.type === 'file') {
+        const file = input.files?.[0];
+        if (file) {
+          formData.append(name, file);
+        }
+        return;
+      }
+      if (input.value.trim() !== '') {
+        formData.append(name, input.value.trim());
+      }
+    });
+    body = formData;
+  } else if (!elements.jsonWrap.hidden && elements.json.value.trim() !== '') {
+    JSON.parse(elements.json.value) as unknown;
+    body = elements.json.value;
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+  }
+
+  const url = buildApiTestUrl(elements, endpoint);
+  const requestUrl = buildApiTestRequestUrl(url, endpoint);
+  const startedAt = performance.now();
+  elements.run.disabled = true;
+  elements.run.textContent = labels.running;
+  elements.response.hidden = false;
+  elements.status.textContent = labels.runningRequest;
+  elements.output.textContent = '';
+
+  try {
+    const response = await fetch(requestUrl.toString(), {
+      method: endpoint.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(endpoint.method) ? undefined : body,
+    });
+    const elapsed = Math.round(performance.now() - startedAt);
+    const text = await response.text();
+    elements.status.textContent = `${response.status} ${response.statusText} · ${elapsed}ms`;
+    elements.output.innerHTML = formatApiTestOutput(text);
+  } catch (error) {
+    const elapsed = Math.round(performance.now() - startedAt);
+    elements.status.textContent = `${labels.requestFailed} · ${elapsed}ms`;
+    elements.output.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    elements.run.disabled = false;
+    elements.run.textContent = apiTestLabels().run;
+  }
+}
+
+function initApiTestConsole(): void {
+  const elements = getApiTestModalElements();
+  if (!elements) {
+    return;
+  }
+
+  elements.saveInfo.checked = readApiTestSaveInfoPreference();
+
+  document.querySelectorAll<HTMLButtonElement>('[data-api-test-open]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const endpoint = parseApiTestEndpoint(button.dataset.apiTestEndpoint);
+      if (endpoint) {
+        openApiTestModal(elements, endpoint);
+      }
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-api-test-close]').forEach((button) => {
+    button.addEventListener('click', () => closeApiTestModal(elements));
+  });
+
+  const resetButton = document.querySelector<HTMLButtonElement>('[data-api-test-reset]');
+  resetButton?.addEventListener('click', () => {
+    if (activeApiTestEndpoint) {
+      clearApiTestSavedForm(activeApiTestEndpoint);
+      openApiTestModal(elements, activeApiTestEndpoint);
+    }
+  });
+
+  elements.modal.addEventListener('click', (event) => {
+    if (event.target === elements.modal) {
+      closeApiTestModal(elements);
+    }
+  });
+
+  elements.saveInfo.addEventListener('change', () => {
+    writeApiTestSaveInfoPreference(elements.saveInfo.checked);
+    if (elements.saveInfo.checked) {
+      saveApiTestForm(elements);
+      return;
+    }
+
+    clearApiTestSavedForms();
+  });
+
+  elements.form.addEventListener('input', () => {
+    updateApiTestUrlPreview(elements);
+    saveApiTestForm(elements);
+  });
+  elements.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    runApiTest(elements).catch((error: unknown) => {
+      const labels = apiTestLabels();
+      elements.response.hidden = false;
+      elements.status.textContent = labels.requestFailed;
+      elements.output.textContent = error instanceof Error ? error.message : String(error);
+      elements.run.disabled = false;
+      elements.run.textContent = labels.run;
+    });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !elements.modal.hidden) {
+      closeApiTestModal(elements);
+    }
+  });
+}
+
 export function initSiteUI(): void {
   const locale = isSiteLocale(document.documentElement.dataset.locale)
     ? document.documentElement.dataset.locale
@@ -1080,14 +2205,23 @@ export function initSiteUI(): void {
   setOpenMenu(null);
 
   if (isDocsPage()) {
+    initDocsTocSearch();
     initDocsScrollSpy();
     initDocsProgressBar();
     initDocsBackToTop();
     initDocsMobileToc();
+
+    const docsRoot = document.querySelector<HTMLElement>('[data-docs-root]');
+    if (docsRoot) {
+      scheduleDocsHashScroll(docsRoot);
+    }
   }
 
   if (isApiPage()) {
+    initApiProductTabs();
     initApiScrollSpy();
+    initApiTocSearch();
     initApiMobileToc();
+    initApiTestConsole();
   }
 }

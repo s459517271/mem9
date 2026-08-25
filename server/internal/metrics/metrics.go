@@ -35,6 +35,17 @@ var (
 		[]string{"method", "route"},
 	)
 
+	// LocalRateLimitDenialsTotal counts denials from the in-process IP and API-key limiters.
+	// PromQL: sum by (scope) (rate(mnemo_local_rate_limit_denials_total[5m]))
+	LocalRateLimitDenialsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "mnemo",
+			Name:      "local_rate_limit_denials_total",
+			Help:      "Total local rate-limit denials, split by bounded scope.",
+		},
+		[]string{"scope"},
+	)
+
 	// ProvisionStepDuration observes the duration of each step in the provision flow.
 	// step labels: tidb_zero_create_instance, create_tenant_record,
 	//              init_schema_create_table, init_schema_vector_index,
@@ -123,6 +134,16 @@ var (
 		},
 		[]string{"step", "reason"},
 	)
+	// IngestFactsFilteredTotal counts extracted facts dropped before reconciliation
+	// because they are not suitable for long-term insight memory.
+	IngestFactsFilteredTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "mnemo",
+			Name:      "ingest_facts_filtered_total",
+			Help:      "Extracted facts filtered before reconciliation, split by reason and source.",
+		},
+		[]string{"reason", "source"},
+	)
 	// EmbeddingRequestsTotal counts model-backed embedding requests for recall query embedding.
 	EmbeddingRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -132,22 +153,78 @@ var (
 		},
 		[]string{"step", "model", "status"},
 	)
-	// ActiveMemoryTotal is the current total number of active memories per cluster.
-	// Use sum(mnemo_active_memory_total) for the global aggregate.
-	ActiveMemoryTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
+
+	// MemoryRecallDuration observes end-to-end memory recall latency.
+	// mode labels: default, single_pool, scan_all, chain, other
+	// status labels: ok, error, timeout, canceled
+	MemoryRecallDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "mnemo",
+			Name:      "memory_recall_duration_seconds",
+			Help:      "End-to-end memory recall request duration in seconds.",
+			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120},
+		},
+		[]string{"mode", "status"},
+	)
+
+	// MemoryRecallTimeoutsTotal counts memory recall requests that ended in a timeout.
+	MemoryRecallTimeoutsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "mnemo",
+			Name:      "memory_recall_timeouts_total",
+			Help:      "Total number of memory recall requests that ended in a timeout.",
+		},
+		[]string{"mode"},
+	)
+
+	// MemoryListRequestsTotal counts all GET /memories operations.
+	// mode and status values are bounded in handler.memoryListMode and memoryListStatus.
+	// status labels: ok, error, timeout, canceled, budget_exceeded
+	// PromQL: sum by (mode, status) (rate(mnemo_memory_list_requests_total[5m]))
+	MemoryListRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "mnemo",
+			Name:      "memory_list_requests_total",
+			Help:      "Total memory list requests, split by bounded mode and outcome.",
+		},
+		[]string{"mode", "status"},
+	)
+
+	// MemoryListDuration observes all GET /memories operations end to end.
+	// PromQL: histogram_quantile(0.95, sum by (le, mode) (rate(mnemo_memory_list_duration_seconds_bucket[5m])))
+	MemoryListDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "mnemo",
+			Name:      "memory_list_duration_seconds",
+			Help:      "End-to-end memory list request duration in seconds.",
+			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120},
+		},
+		[]string{"mode", "status"},
+	)
+
+	// ActiveMemoryTotal is the current server-level total number of active memories.
+	ActiveMemoryTotal = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: "mnemo",
 		Name:      "active_memory_total",
-		Help:      "Total active memories for a cluster, refreshed on memory write or delete.",
-	}, []string{"cluster_id"})
+		Help:      "Total active memories across active tenants, refreshed after memory write, delete, or import.",
+	})
 
-	// ActiveMemory7dTotal is the current total number of active memories created in the
-	// last 7 days per cluster. Use sum(mnemo_active_memory_7d_total) for the global aggregate.
-	// Value reflects the state at the last write or delete event; it is not updated between events.
-	ActiveMemory7dTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	// ActiveMemory7dTotal is the current server-level total number of active memories
+	// created in the last 7 days.
+	ActiveMemory7dTotal = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: "mnemo",
 		Name:      "active_memory_7d_total",
-		Help:      "Active memories created in the last 7 days for a cluster, refreshed on memory write or delete.",
-	}, []string{"cluster_id"})
+		Help:      "Active memories created in the last 7 days across active tenants, refreshed after memory write, delete, or import.",
+	})
+
+	// ActiveTenants7dTotal is the current total number of active tenants with
+	// recorded memory activity in the last 7 days. Value reflects the state at
+	// the last write event; it is not updated between events.
+	ActiveTenants7dTotal = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "mnemo",
+		Name:      "active_tenants_7d_total",
+		Help:      "Active tenants with recorded memory activity in the last 7 days.",
+	})
 
 	// MemoryChangesTotal counts the number of memory-level changes (ADD, UPDATE, and
 	// post-reconcile tag/metadata patches) per cluster. One UPDATE counts as one change
@@ -169,6 +246,41 @@ var (
 			Buckets:   []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
 		},
 		[]string{"op", "status"},
+	)
+
+	// RuntimeUsageManualReconciliationTotal counts runtime usage operations that
+	// require operator reconciliation because local state cannot safely infer the
+	// final quota or metering outcome.
+	RuntimeUsageManualReconciliationTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "mnemo",
+			Name:      "runtime_usage_manual_reconciliation_total",
+			Help:      "Runtime usage operations requiring manual reconciliation.",
+		},
+		[]string{"reason"},
+	)
+
+	// RuntimeUsageReservationUnknownTotal counts reservations or adjustment
+	// intents whose mem9 operation outcome was not durably persisted before the
+	// local watchdog deadline.
+	RuntimeUsageReservationUnknownTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "mnemo",
+			Name:      "runtime_usage_reservation_unknown_total",
+			Help:      "Runtime usage reservations or adjustment intents with unknown operation outcome after local deadline.",
+		},
+		[]string{"phase"},
+	)
+
+	// RuntimeUsageMeteringDeliveryFailedTotal counts runtime usage service
+	// metering events that reached a terminal failed state.
+	RuntimeUsageMeteringDeliveryFailedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "mnemo",
+			Name:      "runtime_usage_metering_delivery_failed_total",
+			Help:      "Runtime usage service metering events that reached terminal failed state.",
+		},
+		[]string{"reason"},
 	)
 )
 

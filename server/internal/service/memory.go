@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/qiffang/mnemos/server/internal/domain"
@@ -19,11 +21,13 @@ import (
 )
 
 const (
-	maxContentLen     = 50000
-	maxTags           = 20
-	maxBulkSize       = 100
-	maxBulkDeleteSize = 1000
-	defaultMinScore   = 0.3
+	maxContentLen        = 50000
+	maxTags              = 20
+	maxBulkSize          = 100
+	maxBulkDeleteSize    = 1000
+	maxAllTypeListWindow = 100000
+	defaultMinScore      = 0.3
+	maxLooseSearchTokens = 5
 
 	// secondHopWeight is the RRF weight applied to second-hop vector search results.
 	// Lower than 1.0 to prevent indirect matches from outranking direct hits.
@@ -44,16 +48,20 @@ type MemoryService struct {
 	ingest    *IngestService
 }
 
-func NewMemoryService(memories repository.MemoryRepo, llmClient *llm.Client, embedder *embed.Embedder, autoModel string, ingestMode IngestMode) *MemoryService {
+type memoryEmbeddingLookup interface {
+	GetEmbeddingsByID(ctx context.Context, ids []string) (map[string][]float32, error)
+}
+
+func NewMemoryService(memories repository.MemoryRepo, llmClient *llm.Client, embedder *embed.Embedder, autoModel string, ingestMode IngestMode, ingestOptions ...IngestOption) *MemoryService {
 	return &MemoryService{
 		memories:  memories,
 		embedder:  embedder,
 		autoModel: autoModel,
-		ingest:    NewIngestService(memories, llmClient, embedder, autoModel, ingestMode),
+		ingest:    NewIngestService(memories, llmClient, embedder, autoModel, ingestMode, ingestOptions...),
 	}
 }
 
-func (s *MemoryService) Create(ctx context.Context, agentID, content string, tags []string, metadata json.RawMessage) (*domain.Memory, int, error) {
+func (s *MemoryService) Create(ctx context.Context, agentID, appID, content string, tags []string, metadata json.RawMessage) (*domain.Memory, int, error) {
 	if err := validateMemoryInput(content, tags); err != nil {
 		return nil, 0, err
 	}
@@ -85,6 +93,7 @@ func (s *MemoryService) Create(ctx context.Context, agentID, content string, tag
 			Embedding:  embedding,
 			MemoryType: domain.TypeInsight,
 			AgentID:    agentID,
+			AppID:      appID,
 			State:      domain.StateActive,
 			Version:    1,
 			UpdatedBy:  agentID,
@@ -100,7 +109,7 @@ func (s *MemoryService) Create(ctx context.Context, agentID, content string, tag
 		return mem, 1, nil
 	}
 
-	result, err := s.ingest.ReconcileContent(ctx, agentID, agentID, "", []string{content})
+	result, err := s.ingest.ReconcileContent(ctx, agentID, agentID, appID, "", []string{content})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -141,18 +150,79 @@ func (s *MemoryService) Create(ctx context.Context, agentID, content string, tag
 
 }
 
+func (s *MemoryService) CreatePinned(ctx context.Context, agentID, appID, content string, tags []string, metadata json.RawMessage) (*domain.Memory, int, error) {
+	memories, err := s.BulkCreate(ctx, agentID, []BulkMemoryInput{
+		{
+			Content:  content,
+			AppID:    appID,
+			Tags:     tags,
+			Metadata: metadata,
+		},
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(memories) == 0 {
+		return nil, 0, fmt.Errorf("bulk create returned no memories")
+	}
+
+	mem := memories[0]
+	return &mem, len(memories), nil
+}
+
 // Get returns a single memory by ID.
 func (s *MemoryService) Get(ctx context.Context, id string) (*domain.Memory, error) {
 	return s.memories.GetByID(ctx, id)
 }
 
+func (s *MemoryService) List(ctx context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
+	mems, total, err := s.memories.List(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	return finalizeSearchResults(mems, filter.Query), total, nil
+}
+
+func (s *MemoryService) ListAllTypes(ctx context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
+	if filter.Limit <= 0 || filter.Limit > 200 {
+		filter.Limit = DefaultSessionLimit
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	if filter.Offset > maxAllTypeListWindow-filter.Limit {
+		return nil, 0, &domain.ValidationError{
+			Field:   "offset",
+			Message: fmt.Sprintf("offset plus limit exceeds the all-types maximum of %d", maxAllTypeListWindow),
+		}
+	}
+	switch strings.TrimSpace(filter.SortBy) {
+	case "", "updated_at":
+	default:
+		return nil, 0, &domain.ValidationError{
+			Field:   "sort_by",
+			Message: "all-types lists only support updated_at sorting",
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.SortDir)) {
+	case "", "asc", "desc":
+	default:
+		return nil, 0, &domain.ValidationError{
+			Field:   "sort_dir",
+			Message: "must be asc or desc",
+		}
+	}
+
+	mems, total, err := s.memories.ListAllTypes(ctx, filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list all-types memories: %w", err)
+	}
+	return finalizeSearchResults(mems, filter.Query), total, nil
+}
+
 func (s *MemoryService) Search(ctx context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
 	if filter.Query == "" {
-		mems, total, err := s.memories.List(ctx, filter)
-		if err != nil {
-			return nil, 0, err
-		}
-		return populateRelativeAge(mems), total, nil
+		return s.List(ctx, filter)
 	}
 	searchFilter := filter
 	searchFilter.SessionID = ""
@@ -171,6 +241,16 @@ func (s *MemoryService) Search(ctx context.Context, filter domain.MemoryFilter) 
 	// FTS probe still running (cold start) — fall back to LIKE-based keyword search.
 	slog.Warn("search: FTS not yet available, falling back to keyword search")
 	return s.keywordOnlySearch(ctx, searchFilter)
+}
+
+// ContentKeywordSearch performs direct content substring search for list filters.
+// Unlike Search(), it deliberately bypasses vector, FTS, and recall-style
+// ranking so UI list search behaves like a content filter.
+func (s *MemoryService) ContentKeywordSearch(ctx context.Context, filter domain.MemoryFilter) ([]domain.Memory, int, error) {
+	if filter.Query == "" {
+		return s.List(ctx, filter)
+	}
+	return s.keywordOnlySearch(ctx, filter)
 }
 
 func (s *MemoryService) SearchCandidates(
@@ -239,14 +319,20 @@ func (s *MemoryService) ftsOnlySearch(ctx context.Context, filter domain.MemoryF
 	}
 	fetchLimit := limit * 3
 
-	ftsResults, err := s.memories.FTSSearch(ctx, filter.Query, filter, fetchLimit)
+	ftsResults, err := s.repositoryFTSSearch(ctx, filter.Query, filter, fetchLimit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("FTS search: %w", err)
+	}
+	if len(ftsResults) == 0 && shouldRunLooseKeywordFallback(filter.Query) {
+		ftsResults, err = s.looseTokenKeywordSearch(ctx, filter, fetchLimit)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 	slog.Info("fts search completed", "query_len", len(filter.Query), "results", len(ftsResults))
 
 	page, total := s.paginate(ftsResults, offset, limit)
-	return populateRelativeAge(page), total, nil
+	return finalizeSearchResults(page, filter.Query), total, nil
 }
 
 func observeRecallEmbeddingRequest(embedder *embed.Embedder, err error) {
@@ -291,19 +377,139 @@ func (s *MemoryService) keywordOnlySearch(ctx context.Context, filter domain.Mem
 	if err != nil {
 		return nil, 0, fmt.Errorf("keyword search: %w", err)
 	}
+	if len(kwResults) == 0 && shouldRunLooseKeywordFallback(filter.Query) {
+		kwResults, err = s.looseTokenKeywordSearch(ctx, filter, fetchLimit)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
 	slog.Info("keyword search completed (FTS unavailable)", "query_len", len(filter.Query), "results", len(kwResults))
 
 	page, total := s.paginate(kwResults, offset, limit)
-	return populateRelativeAge(page), total, nil
+	return finalizeSearchResults(page, filter.Query), total, nil
+}
+
+func (s *MemoryService) looseTokenKeywordSearch(ctx context.Context, filter domain.MemoryFilter, fetchLimit int) ([]domain.Memory, error) {
+	tokens := looseSearchTokens(filter.Query)
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	if fetchLimit <= 0 {
+		fetchLimit = 50
+	}
+
+	byID := make(map[string]domain.Memory)
+	for _, token := range tokens {
+		results, err := s.memories.KeywordSearch(ctx, token, filter, fetchLimit)
+		if err != nil {
+			return nil, fmt.Errorf("keyword token search: %w", err)
+		}
+		for _, memory := range results {
+			if _, ok := byID[memory.ID]; !ok {
+				byID[memory.ID] = memory
+			}
+		}
+	}
+
+	memories := make([]domain.Memory, 0, len(byID))
+	for _, memory := range byID {
+		memories = append(memories, memory)
+	}
+	sort.SliceStable(memories, func(i, j int) bool {
+		leftScore := looseSearchTokenMatchScore(memories[i].Content, tokens)
+		rightScore := looseSearchTokenMatchScore(memories[j].Content, tokens)
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+		if !memories[i].UpdatedAt.Equal(memories[j].UpdatedAt) {
+			return memories[i].UpdatedAt.After(memories[j].UpdatedAt)
+		}
+		return memories[i].ID < memories[j].ID
+	})
+	if len(memories) > fetchLimit {
+		memories = memories[:fetchLimit]
+	}
+	return memories, nil
+}
+
+var looseSearchStopWords = map[string]struct{}{
+	"a": {}, "an": {}, "and": {}, "are": {}, "as": {}, "at": {}, "be": {}, "by": {},
+	"did": {}, "do": {}, "does": {}, "for": {}, "from": {}, "has": {}, "have": {},
+	"how": {}, "if": {}, "in": {}, "is": {}, "not": {}, "of": {}, "on": {}, "or": {},
+	"the": {}, "to": {}, "was": {}, "were": {}, "what": {}, "when": {}, "where": {},
+	"whether": {}, "which": {}, "who": {}, "whom": {}, "whose": {}, "why": {}, "with": {},
+}
+
+func looseSearchTokens(query string) []string {
+	var tokens []string
+	seen := make(map[string]struct{})
+	var current strings.Builder
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		token := current.String()
+		current.Reset()
+		key := strings.ToLower(token)
+		if len(key) < 2 {
+			return
+		}
+		if _, ok := looseSearchStopWords[key]; ok {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		tokens = append(tokens, token)
+	}
+
+	for _, r := range query {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			current.WriteRune(r)
+			continue
+		}
+		flush()
+		if len(tokens) >= maxLooseSearchTokens {
+			return tokens
+		}
+	}
+	flush()
+	if len(tokens) > maxLooseSearchTokens {
+		return tokens[:maxLooseSearchTokens]
+	}
+	return tokens
+}
+
+func looseSearchTokenMatchScore(content string, tokens []string) int {
+	content = strings.ToLower(content)
+	score := 0
+	for _, token := range tokens {
+		if strings.Contains(content, strings.ToLower(token)) {
+			score++
+		}
+	}
+	return score
+}
+
+func shouldRunLooseKeywordFallback(query string) bool {
+	tokens := looseSearchTokens(query)
+	return len(tokens) == 1 || strings.ContainsAny(query, "?？")
 }
 
 func (s *MemoryService) ftsOnlyCandidates(ctx context.Context, filter domain.MemoryFilter, sourcePool RecallSourcePool, opts RecallCandidateOptions) ([]RecallCandidate, error) {
 	limit := normalizeRecallLimit(filter.Limit, 10)
 	fetchLimit := limit * normalizeRecallFetchMultiplier(opts.FetchMultiplier, 3)
 
-	ftsResults, err := s.memories.FTSSearch(ctx, filter.Query, filter, fetchLimit)
+	ftsResults, err := s.repositoryFTSSearch(ctx, filter.Query, filter, fetchLimit)
 	if err != nil {
 		return nil, fmt.Errorf("FTS search: %w", err)
+	}
+	if len(ftsResults) == 0 && shouldRunLooseKeywordFallback(filter.Query) {
+		ftsResults, err = s.looseTokenKeywordSearch(ctx, filter, fetchLimit)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return dedupRecallCandidatesByContent(mergeRecallCandidates(sourcePool, ftsResults, nil, nil)), nil
 }
@@ -315,6 +521,12 @@ func (s *MemoryService) keywordOnlyCandidates(ctx context.Context, filter domain
 	kwResults, err := s.memories.KeywordSearch(ctx, filter.Query, filter, fetchLimit)
 	if err != nil {
 		return nil, fmt.Errorf("keyword search: %w", err)
+	}
+	if len(kwResults) == 0 && shouldRunLooseKeywordFallback(filter.Query) {
+		kwResults, err = s.looseTokenKeywordSearch(ctx, filter, fetchLimit)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return dedupRecallCandidatesByContent(mergeRecallCandidates(sourcePool, kwResults, nil, nil)), nil
 }
@@ -358,7 +570,7 @@ func (s *MemoryService) hybridSearch(ctx context.Context, filter domain.MemoryFi
 	var kwResults []domain.Memory
 	if s.memories.FTSAvailable() {
 		var kwErr error
-		kwResults, kwErr = s.memories.FTSSearch(ctx, filter.Query, filter, fetchLimit)
+		kwResults, kwErr = s.repositoryFTSSearch(ctx, filter.Query, filter, fetchLimit)
 		if kwErr != nil {
 			return nil, 0, fmt.Errorf("FTS search: %w", kwErr)
 		}
@@ -370,6 +582,14 @@ func (s *MemoryService) hybridSearch(ctx context.Context, filter domain.MemoryFi
 		}
 	}
 
+	if len(vecResults) == 0 && len(kwResults) == 0 && shouldRunLooseKeywordFallback(filter.Query) {
+		fallbackResults, fallbackErr := s.looseTokenKeywordSearch(ctx, filter, fetchLimit)
+		if fallbackErr != nil {
+			return nil, 0, fallbackErr
+		}
+		kwResults = fallbackResults
+	}
+
 	slog.Info("hybrid search completed", "query_len", len(filter.Query), "vec_results", len(vecResults), "kw_results", len(kwResults))
 
 	scores := rrfMerge(kwResults, vecResults)
@@ -378,7 +598,7 @@ func (s *MemoryService) hybridSearch(ctx context.Context, filter domain.MemoryFi
 	merged := sortByScore(mems, scores)
 
 	page, total := s.paginate(merged, offset, limit)
-	return populateRelativeAge(setScores(page, scores)), total, nil
+	return finalizeSearchResults(setScores(page, scores), filter.Query), total, nil
 }
 
 func (s *MemoryService) hybridCandidates(ctx context.Context, filter domain.MemoryFilter, sourcePool RecallSourcePool, opts RecallCandidateOptions) ([]RecallCandidate, error) {
@@ -399,7 +619,7 @@ func (s *MemoryService) hybridCandidates(ctx context.Context, filter domain.Memo
 
 	var kwResults []domain.Memory
 	if s.memories.FTSAvailable() {
-		kwResults, err = s.memories.FTSSearch(ctx, filter.Query, filter, fetchLimit)
+		kwResults, err = s.repositoryFTSSearch(ctx, filter.Query, filter, fetchLimit)
 		if err != nil {
 			return nil, fmt.Errorf("FTS search: %w", err)
 		}
@@ -407,6 +627,13 @@ func (s *MemoryService) hybridCandidates(ctx context.Context, filter domain.Memo
 		kwResults, err = s.memories.KeywordSearch(ctx, filter.Query, filter, fetchLimit)
 		if err != nil {
 			return nil, fmt.Errorf("keyword search: %w", err)
+		}
+	}
+
+	if len(vecResults) == 0 && len(kwResults) == 0 && shouldRunLooseKeywordFallback(filter.Query) {
+		kwResults, err = s.looseTokenKeywordSearch(ctx, filter, fetchLimit)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -447,7 +674,7 @@ func (s *MemoryService) autoHybridSearch(ctx context.Context, filter domain.Memo
 	var kwResults []domain.Memory
 	if s.memories.FTSAvailable() {
 		var kwErr error
-		kwResults, kwErr = s.memories.FTSSearch(ctx, filter.Query, filter, fetchLimit)
+		kwResults, kwErr = s.repositoryFTSSearch(ctx, filter.Query, filter, fetchLimit)
 		if kwErr != nil {
 			return nil, 0, fmt.Errorf("FTS search: %w", kwErr)
 		}
@@ -457,6 +684,14 @@ func (s *MemoryService) autoHybridSearch(ctx context.Context, filter domain.Memo
 		if kwErr != nil {
 			return nil, 0, fmt.Errorf("keyword search: %w", kwErr)
 		}
+	}
+
+	if len(vecResults) == 0 && len(kwResults) == 0 && shouldRunLooseKeywordFallback(filter.Query) {
+		fallbackResults, fallbackErr := s.looseTokenKeywordSearch(ctx, filter, fetchLimit)
+		if fallbackErr != nil {
+			return nil, 0, fallbackErr
+		}
+		kwResults = fallbackResults
 	}
 
 	slog.Info("auto hybrid search completed", "query_len", len(filter.Query), "vec_results", len(vecResults), "kw_results", len(kwResults))
@@ -487,7 +722,7 @@ func (s *MemoryService) autoHybridSearch(ctx context.Context, filter domain.Memo
 	merged := sortByScore(mems, scores)
 
 	page, total := s.paginate(merged, offset, limit)
-	return populateRelativeAge(setScores(page, scores)), total, nil
+	return finalizeSearchResults(setScores(page, scores), filter.Query), total, nil
 }
 
 func (s *MemoryService) autoHybridCandidates(
@@ -512,7 +747,7 @@ func (s *MemoryService) autoHybridCandidates(
 	var kwResults []domain.Memory
 	keywordStart := time.Now()
 	if s.memories.FTSAvailable() {
-		kwResults, err = s.memories.FTSSearch(ctx, filter.Query, filter, fetchLimit)
+		kwResults, err = s.repositoryFTSSearch(ctx, filter.Query, filter, fetchLimit)
 		if err != nil {
 			return nil, fmt.Errorf("FTS search: %w", err)
 		}
@@ -523,6 +758,13 @@ func (s *MemoryService) autoHybridCandidates(
 		}
 	}
 	keywordDuration := time.Since(keywordStart)
+
+	if len(vecResults) == 0 && len(kwResults) == 0 && shouldRunLooseKeywordFallback(filter.Query) {
+		kwResults, err = s.looseTokenKeywordSearch(ctx, filter, fetchLimit)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	var secondHopResults []domain.Memory
 	secondHopStart := time.Now()
@@ -588,6 +830,7 @@ func (s *MemoryService) secondHopAutoSearch(
 	for _, m := range seeds {
 		seedIDs[m.ID] = struct{}{}
 	}
+	s.hydrateSecondHopSeedEmbeddings(ctx, seeds)
 
 	// Launch concurrent second-hop searches using first-hop embeddings
 	// to avoid redundant embedding API calls.
@@ -650,6 +893,43 @@ func (s *MemoryService) secondHopAutoSearch(
 		return bestScore[result[i].ID] > bestScore[result[j].ID]
 	})
 	return result
+}
+
+func (s *MemoryService) hydrateSecondHopSeedEmbeddings(ctx context.Context, seeds []domain.Memory) {
+	lookup, ok := s.memories.(memoryEmbeddingLookup)
+	if !ok {
+		return
+	}
+
+	ids := make([]string, 0, len(seeds))
+	seen := make(map[string]struct{}, len(seeds))
+	for _, seed := range seeds {
+		if len(seed.Embedding) > 0 || seed.ID == "" {
+			continue
+		}
+		if _, exists := seen[seed.ID]; exists {
+			continue
+		}
+		seen[seed.ID] = struct{}{}
+		ids = append(ids, seed.ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	embeddings, err := lookup.GetEmbeddingsByID(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "second-hop seed embedding lookup failed", "err", err)
+		return
+	}
+	for i := range seeds {
+		if len(seeds[i].Embedding) > 0 {
+			continue
+		}
+		if embedding := embeddings[seeds[i].ID]; len(embedding) > 0 {
+			seeds[i].Embedding = embedding
+		}
+	}
 }
 
 func collectMems(kwResults, vecResults []domain.Memory) map[string]domain.Memory {
@@ -790,7 +1070,11 @@ func (s *MemoryService) Update(ctx context.Context, agentName, id, content strin
 		current.Tags = tags
 	}
 	if metadata != nil {
-		current.Metadata = metadata
+		preservedMetadata, err := preserveExternalProvenanceMetadata(current.Metadata, metadata)
+		if err != nil {
+			return nil, err
+		}
+		current.Metadata = preservedMetadata
 	}
 	current.UpdatedBy = agentName
 
@@ -817,18 +1101,27 @@ func (s *MemoryService) Update(ctx context.Context, agentName, id, content strin
 	return updated, nil
 }
 
-func (s *MemoryService) Delete(ctx context.Context, id, agentName string) error {
+func (s *MemoryService) Delete(ctx context.Context, id, agentName string) (int64, error) {
 	return s.memories.SoftDelete(ctx, id, agentName)
 }
 
 // BulkDelete soft-deletes multiple memories by ID. Returns the number of
 // memories actually deleted (already-deleted rows are excluded from the count).
 func (s *MemoryService) BulkDelete(ctx context.Context, ids []string, agentName string) (int64, error) {
+	unique, err := ValidateBulkDeleteIDs(ids)
+	if err != nil {
+		return 0, err
+	}
+
+	return s.memories.BulkSoftDelete(ctx, unique, agentName)
+}
+
+func ValidateBulkDeleteIDs(ids []string) ([]string, error) {
 	if len(ids) == 0 {
-		return 0, &domain.ValidationError{Field: "ids", Message: "required"}
+		return nil, &domain.ValidationError{Field: "ids", Message: "required"}
 	}
 	if len(ids) > maxBulkDeleteSize {
-		return 0, &domain.ValidationError{Field: "ids", Message: "too many (max 1000)"}
+		return nil, &domain.ValidationError{Field: "ids", Message: "too many (max 1000)"}
 	}
 
 	seen := make(map[string]struct{}, len(ids))
@@ -843,10 +1136,9 @@ func (s *MemoryService) BulkDelete(ctx context.Context, ids []string, agentName 
 		}
 	}
 	if len(unique) == 0 {
-		return 0, &domain.ValidationError{Field: "ids", Message: "required"}
+		return nil, &domain.ValidationError{Field: "ids", Message: "required"}
 	}
-
-	return s.memories.BulkSoftDelete(ctx, unique, agentName)
+	return unique, nil
 }
 
 func (s *MemoryService) Bootstrap(ctx context.Context, limit int) ([]domain.Memory, error) {
@@ -861,24 +1153,13 @@ func (s *MemoryService) Bootstrap(ctx context.Context, limit int) ([]domain.Memo
 
 // BulkCreate creates multiple memories at once.
 func (s *MemoryService) BulkCreate(ctx context.Context, agentName string, items []BulkMemoryInput) ([]domain.Memory, error) {
-	if len(items) == 0 {
-		return nil, &domain.ValidationError{Field: "memories", Message: "required"}
-	}
-	if len(items) > maxBulkSize {
-		return nil, &domain.ValidationError{Field: "memories", Message: "too many (max 100)"}
+	if err := ValidateBulkMemoryInputs(items); err != nil {
+		return nil, err
 	}
 
 	now := time.Now()
 	memories := make([]*domain.Memory, 0, len(items))
-	for i, item := range items {
-		if err := validateMemoryInput(item.Content, item.Tags); err != nil {
-			var ve *domain.ValidationError
-			if errors.As(err, &ve) {
-				ve.Field = "memories[" + strconv.Itoa(i) + "]." + ve.Field
-			}
-			return nil, err
-		}
-
+	for _, item := range items {
 		var embedding []float32
 		if s.autoModel == "" && s.embedder != nil {
 			var err error
@@ -892,10 +1173,12 @@ func (s *MemoryService) BulkCreate(ctx context.Context, agentName string, items 
 			ID:         uuid.New().String(),
 			Content:    item.Content,
 			Source:     agentName,
+			AgentID:    agentName,
 			Tags:       item.Tags,
 			Metadata:   item.Metadata,
 			Embedding:  embedding,
 			MemoryType: domain.TypePinned,
+			AppID:      item.AppID,
 			State:      domain.StateActive,
 			Version:    1,
 			UpdatedBy:  agentName,
@@ -918,11 +1201,42 @@ func (s *MemoryService) BulkCreate(ctx context.Context, agentName string, items 
 	return result, nil
 }
 
+func ValidateBulkMemoryInputs(items []BulkMemoryInput) error {
+	if len(items) == 0 {
+		return &domain.ValidationError{Field: "memories", Message: "required"}
+	}
+	if len(items) > maxBulkSize {
+		return &domain.ValidationError{Field: "memories", Message: "too many (max 100)"}
+	}
+
+	for i, item := range items {
+		if err := validateMemoryInput(item.Content, item.Tags); err != nil {
+			var ve *domain.ValidationError
+			if errors.As(err, &ve) {
+				ve.Field = "memories[" + strconv.Itoa(i) + "]." + ve.Field
+			}
+			return err
+		}
+		appID := item.AppID
+		if appID == "" {
+			appID = item.AppIDLegacy
+		}
+		appID = strings.TrimSpace(appID)
+		if len(appID) > 100 {
+			return &domain.ValidationError{Field: "memories[" + strconv.Itoa(i) + "].appId", Message: "too long (max 100)"}
+		}
+		items[i].AppID = appID
+	}
+	return nil
+}
+
 // BulkMemoryInput is the input shape for each item in a bulk create request.
 type BulkMemoryInput struct {
-	Content  string          `json:"content"`
-	Tags     []string        `json:"tags,omitempty"`
-	Metadata json.RawMessage `json:"metadata,omitempty"`
+	Content     string          `json:"content"`
+	AppID       string          `json:"appId,omitempty"`
+	AppIDLegacy string          `json:"app_id,omitempty"`
+	Tags        []string        `json:"tags,omitempty"`
+	Metadata    json.RawMessage `json:"metadata,omitempty"`
 }
 
 func validateMemoryInput(content string, tags []string) error {

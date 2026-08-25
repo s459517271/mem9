@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { router } from "@/router";
+import { features } from "@/config/features";
 import i18n from "@/i18n";
 import type { Memory } from "@/types/memory";
 import type { SpaceAnalysisState } from "@/types/analysis";
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   useSelectedSessionMessages: vi.fn(),
   useMemories: vi.fn(),
   useDeepAnalysisReports: vi.fn(),
+  createMemoryMutateAsync: vi.fn(),
 }));
 
 const FIXED_NOW = new Date("2026-03-21T12:00:00Z");
@@ -165,6 +167,16 @@ const archivedMemory = createMemory(
   "2026-03-21T00:00:00Z",
 );
 
+const defaultMemories = [
+  activityNewest,
+  preferenceMemory,
+  activityOlder,
+  archivedMemory,
+];
+
+let mockedPageMemories = [...defaultMemories];
+let mockedSourceMemories = [...defaultMemories];
+
 const analysisState: SpaceAnalysisState = {
   phase: "completed",
   snapshot: {
@@ -289,6 +301,30 @@ vi.mock("@/lib/memory-insight-background", async () => {
   };
 });
 
+vi.mock("@/components/space/memory-insight-workspace", () => ({
+  MemoryInsightWorkspace: ({
+    memories,
+    onMemorySelect,
+  }: {
+    memories: Memory[];
+    onMemorySelect: (memory: Memory) => void;
+  }) => (
+    <div data-testid="mock-memory-insight-workspace">
+      <button
+        type="button"
+        onClick={() => {
+          const memory = memories[0];
+          if (memory) {
+            onMemorySelect(memory);
+          }
+        }}
+      >
+        Open insight memory
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock("@/lib/session", () => ({
   getActiveSpaceId: () => "space-1",
   getSpaceId: () => "space-1",
@@ -323,7 +359,13 @@ vi.mock("@/api/queries", () => ({
   useStats: (spaceId: string, range?: string, enabled = true) => {
     mocks.useStats(spaceId, range, enabled);
     return {
-      data: enabled ? { total: 4, pinned: 0, insight: 4 } : undefined,
+      data: enabled
+        ? {
+            total: mockedPageMemories.length,
+            pinned: mockedPageMemories.filter((memory) => memory.memory_type === "pinned").length,
+            insight: mockedPageMemories.filter((memory) => memory.memory_type === "insight").length,
+          }
+        : undefined,
       isLoading: false,
       isFetching: false,
     };
@@ -334,8 +376,8 @@ vi.mock("@/api/queries", () => ({
       data: {
         pages: [
           {
-            memories: [activityNewest, preferenceMemory, activityOlder, archivedMemory],
-            total: 4,
+            memories: mockedPageMemories,
+            total: mockedPageMemories.length,
             limit: 50,
             offset: 0,
           },
@@ -417,7 +459,10 @@ vi.mock("@/api/queries", () => ({
       isFetching: false,
     };
   },
-  useCreateMemory: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateMemory: () => ({
+    mutateAsync: mocks.createMemoryMutateAsync,
+    isPending: false,
+  }),
   useDeleteMemory: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateMemory: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useExportMemories: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -431,7 +476,7 @@ vi.mock("@/api/source-memories", () => ({
   useSourceMemories: (_spaceId: string) => {
     mocks.useSourceMemories(_spaceId);
     return {
-      data: [activityNewest, preferenceMemory, activityOlder, archivedMemory],
+      data: mockedSourceMemories,
       isLoading: false,
       isFetching: false,
       refetch: vi.fn(async () => undefined),
@@ -440,6 +485,21 @@ vi.mock("@/api/source-memories", () => ({
 }));
 
 vi.mock("@/api/analysis-queries", () => ({
+  useUserProfile: () => ({
+    data: {
+      generatedAt: "2026-03-21T12:00:00.000Z",
+      source: { memoryTypes: ["insight", "pinned"], memoryCount: mockedSourceMemories.length },
+      summary: {
+        text: "Mocked user profile summary.",
+        evidence: [],
+      },
+      attributes: [],
+      changes: [],
+      relationships: [],
+      items: [],
+    },
+    isLoading: false,
+  }),
   useSpaceAnalysis: () => ({
     state: analysisState,
     taxonomy: {
@@ -530,6 +590,19 @@ describe("SpacePage", () => {
     mocks.useSelectedSessionMessages.mockClear();
     mocks.useMemories.mockClear();
     mocks.useDeepAnalysisReports.mockClear();
+    mocks.createMemoryMutateAsync.mockReset();
+    mocks.createMemoryMutateAsync.mockResolvedValue(
+      createMemory(
+        "mem-new-1",
+        "Remember my coffee order",
+        "2026-03-21T12:00:00Z",
+        "pinned",
+        ["preference", "coffee"],
+      ),
+    );
+    mockedPageMemories = [...defaultMemories];
+    mockedSourceMemories = [...defaultMemories];
+    features.enableManualAdd = false;
     await i18n.changeLanguage("en");
     window.history.pushState({}, "", "/your-memory/space");
     await act(async () => {
@@ -553,6 +626,55 @@ describe("SpacePage", () => {
     expect(shouldCompactMemoryOverview(selected, false, "sheet")).toBe(false);
   });
 
+  it("opens an insight memory detail sheet from the Memory Insight tab", async () => {
+    renderSpacePage();
+
+    const insightTab = screen.getByRole("tab", { name: "Memory Insight" });
+    insightTab.focus();
+    fireEvent.keyDown(insightTab, { key: "Enter" });
+
+    await waitFor(() => expect(insightTab).toHaveAttribute("data-state", "active"));
+    fireEvent.click(screen.getByRole("button", { name: "Open insight memory" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Deploy dashboard status update" }),
+    ).toBeInTheDocument();
+  });
+
+  it("closes the list memory detail when switching to Memory Insight", async () => {
+    renderSpacePage();
+
+    const listTab = screen.getByRole("tab", { name: "Memory List" });
+    listTab.focus();
+    fireEvent.keyDown(listTab, { key: "Enter" });
+
+    await waitFor(() => expect(listTab).toHaveAttribute("data-state", "active"));
+
+    const activityCard = screen
+      .getByText("Deploy dashboard status update")
+      .closest('[role="button"]');
+
+    expect(activityCard).not.toBeNull();
+    fireEvent.click(activityCard!);
+
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-mp-event="Dashboard/Detail/DeleteClicked"]'),
+      ).not.toBeNull();
+    });
+
+    const insightTab = screen.getByRole("tab", { name: "Memory Insight" });
+    insightTab.focus();
+    fireEvent.keyDown(insightTab, { key: "Enter" });
+
+    await waitFor(() => expect(insightTab).toHaveAttribute("data-state", "active"));
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-mp-event="Dashboard/Detail/DeleteClicked"]'),
+      ).toBeNull();
+    });
+  });
+
   it("filters memories by clicked analysis category without auto-opening detail", async () => {
     renderSpacePage();
 
@@ -569,18 +691,11 @@ describe("SpacePage", () => {
     ).toBeNull();
   });
 
-  it("does not prefetch deep-analysis reports before the analysis tab is opened", async () => {
+  it("keeps deep-analysis reports idle while the analysis tab entry is hidden", async () => {
     renderSpacePage();
 
+    expect(screen.queryByRole("tab", { name: "Memory Analysis" })).not.toBeInTheDocument();
     expect(mocks.useDeepAnalysisReports).not.toHaveBeenCalled();
-
-    const analysisTab = screen.getByRole("tab", { name: "Memory Analysis" });
-    analysisTab.focus();
-    fireEvent.keyDown(analysisTab, { key: "Enter" });
-
-    await waitFor(() => {
-      expect(mocks.useDeepAnalysisReports).toHaveBeenCalledWith("space-1", true);
-    });
   });
 
   it("keeps all-range stats disabled until the export dialog is opened", async () => {
@@ -601,6 +716,71 @@ describe("SpacePage", () => {
     await waitFor(() => {
       expect(mocks.useStats).toHaveBeenCalledWith("space-1", undefined, true);
     });
+  });
+
+  it("creates pinned manual memory from the toolbar add dialog", async () => {
+    features.enableManualAdd = true;
+
+    renderSpacePage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add memory" }));
+
+    const dialog = screen.getByRole("dialog");
+    const textboxes = within(dialog).getAllByRole("textbox");
+    const contentInput = textboxes[0];
+    const tagsInput = textboxes[1];
+
+    if (!contentInput || !tagsInput) {
+      throw new Error("Expected content and tags inputs in the add dialog");
+    }
+
+    fireEvent.change(contentInput, {
+      target: { value: "Remember my coffee order" },
+    });
+    fireEvent.change(tagsInput, {
+      target: { value: "preference, coffee" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mocks.createMemoryMutateAsync).toHaveBeenCalledWith({
+        content: "Remember my coffee order",
+        memory_type: "pinned",
+        tags: ["preference", "coffee"],
+      });
+    });
+  });
+
+  it("hides empty-state manual-add affordance when manual add is gated off", async () => {
+    mockedPageMemories = [];
+    mockedSourceMemories = [];
+
+    renderSpacePage();
+
+    expect(screen.getByText("This space has no memories yet")).toBeInTheDocument();
+    expect(
+      screen.getByText("Memories are accumulated as you chat with your agent."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save your first memory" }),
+    ).toBeNull();
+  });
+
+  it("shows empty-state manual-add affordance when manual add is enabled", async () => {
+    mockedPageMemories = [];
+    mockedSourceMemories = [];
+    features.enableManualAdd = true;
+
+    renderSpacePage();
+
+    expect(
+      screen.getByText(
+        "Memories are accumulated as you chat with your agent. You can also save the first one now.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save your first memory" }),
+    ).toBeInTheDocument();
   });
 
   it("navigates to memory farm in the current tab from the single CTA", async () => {

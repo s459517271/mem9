@@ -5,7 +5,7 @@ title: mnemos — Agent context
 ## What this repo is
 
 mnemos is shared, cloud-persistent memory for coding agents. The core system is a Go
-REST server backed by TiDB/MySQL, plus three agent integrations, a standalone CLI,
+REST server backed by TiDB/MySQL, plus four agent integrations, a standalone CLI,
 and a small Astro site.
 
 ## Cross-repo relationship: `mem9` and `mem9-node`
@@ -21,16 +21,17 @@ and a small Astro site.
 
 | Path                 | Role                                                         |
 | -------------------- | ------------------------------------------------------------ |
-| `server/`            | Go API server, business logic, TiDB SQL, tenant provisioning |
+| `server/`            | Go API server, business logic, TiDB SQL, tenant provisioning, runtime usage |
 | `cli/`               | Standalone Go CLI for exercising mnemo-server endpoints      |
 | `dashboard/app/`     | React dashboard SPA; frontend half of the dashboard product  |
 | `openclaw-plugin/`   | OpenClaw memory plugin (`kind: "memory"`)                    |
 | `opencode-plugin/`   | OpenCode plugin (`@mem9/opencode`)                           |
 | `claude-plugin/`     | Claude Code plugin (hooks + skills)                          |
+| `codex-plugin/`      | Codex plugin (hooks + `$mem9:*` skills)                       |
+| `dsh-plugin/`   | DeepSeek Harness DSH/Cordis bundle                            |
 | `docs/design/`       | Architecture/proposal notes and design drafts                |
 | `site/`              | Astro static site — deployed to Netlify from `main` branch   |
 | `e2e/`               | Live end-to-end scripts against a running server             |
-| `k8s/`               | Deployment and gateway manifests                             |
 | `benchmark/MR-NIAH/` | Benchmark harness for OpenClaw memory evaluation             |
 
 ## Commands
@@ -41,13 +42,20 @@ make build
 make vet
 make test
 make test-integration
+MNEMO_DSN="user:pass@tcp(host:4000)/db?parseTime=true" make dev
 
 # Single Go test
 cd server && go test -race -count=1 -run TestFunctionName ./internal/service/
 
-# TypeScript verification
+# TypeScript plugin verification
+cd openclaw-plugin && npm test
 cd openclaw-plugin && npm run typecheck
-cd opencode-plugin && npm run typecheck
+cd opencode-plugin && pnpm test
+cd opencode-plugin && pnpm run typecheck
+pnpm --dir codex-plugin test
+pnpm --dir codex-plugin typecheck
+pnpm --dir dsh-plugin test
+pnpm --dir dsh-plugin typecheck
 
 # Site dev/build
 cd site && npm run dev
@@ -58,6 +66,8 @@ cd cli && go build -o mnemo .
 
 # Run server locally
 cd server && MNEMO_DSN="user:pass@tcp(host:4000)/db?parseTime=true" go run ./cmd/mnemo-server
+# Run server locally with auto-restart on server code changes
+MNEMO_DSN="user:pass@tcp(host:4000)/db?parseTime=true" make dev
 ```
 
 ## Global conventions
@@ -69,7 +79,24 @@ cd server && MNEMO_DSN="user:pass@tcp(host:4000)/db?parseTime=true" go run ./cmd
 - `INSERT ... ON DUPLICATE KEY UPDATE` is the expected upsert pattern.
 - Atomic version bump happens in SQL: `SET version = version + 1`.
 - `X-Mnemo-Agent-Id` is the per-agent identity header for memory requests.
+- Legacy API metering uses `MNEMO_METERING_*`; runtime usage quota and console metering use `MNEMO_RUNTIME_USAGE_*` and do not use `MNEMO_METERING_URL`.
 - Always use `make` targets for building and Docker image operations — never construct raw `go build` or `docker build` commands from scratch. Use `make build-linux` for the server binary and `REGISTRY=<ecr> COMMIT=<tag> make docker` for images.
+
+## Git workflow
+
+- Do not commit directly to `main`.
+- Before committing, create or switch to a feature branch.
+- Changes must reach `main` by opening a pull request and merging that PR.
+
+## Versioning
+
+- `meta.json` at the repository root is the source of truth for the mem9 version.
+- Versions start at `1.0.0` and use `MAJOR.MINOR.PATCH`.
+- Small fixes and maintenance updates should bump `PATCH`.
+- Larger user-facing features should bump `MINOR`.
+- Breaking changes or product-level compatibility resets should bump `MAJOR`.
+- Release-specific version bumps are a developer decision; do not bump `meta.json` unless the task explicitly asks for a release/version update.
+- Every feature entry in `site/` release notes should carry a version tag. Legacy release note entries default to `v1.0.0`; new entries should set the version that corresponds to the feature release.
 
 ## Go style
 
@@ -114,14 +141,25 @@ cd server && MNEMO_DSN="user:pass@tcp(host:4000)/db?parseTime=true" go run ./cmd
 | -------------------- | ------------------------------------------- |
 | Add/change route     | `server/internal/handler/handler.go`        |
 | Memory CRUD / search | `server/internal/service/memory.go`         |
+| Confidence recall    | `server/internal/handler/recall.go`         |
+| Space Chain routing  | `server/internal/handler/chain_runtime.go`  |
+| Webhook dispatch     | `server/internal/handler/webhook.go`, `server/internal/handler/webhook_events.go` |
 | Ingest pipeline      | `server/internal/service/ingest.go`         |
+| Session storage      | `server/internal/service/session.go`        |
+| Source turn decoration | `server/internal/service/search_source_turns.go` |
+| Temporal facts       | `server/internal/service/temporal_fact.go`  |
+| Activity tracking    | `server/internal/service/activity.go`       |
 | TiDB SQL             | `server/internal/repository/tidb/memory.go` |
 | Tenant provisioning  | `server/internal/service/tenant.go`         |
+| Runtime usage quota  | `server/internal/runtimeusage/`             |
+| Metering writer      | `server/internal/metering/`                 |
 | CLI command wiring   | `cli/main.go`                               |
 | Dashboard frontend   | `dashboard/app/`                            |
 | Dashboard backend (sibling repo) | `../mem9-node/apps/api/`        |
 | Dashboard worker (sibling repo) | `../mem9-node/apps/worker/`      |
 | Claude hooks         | `claude-plugin/hooks/`                      |
+| Codex hooks and skills | `codex-plugin/`                          |
+| DeepSeek Harness wiring | `dsh-plugin/src/index.ts`          |
 | Architecture notes   | `docs/design/`                              |
 | OpenCode wiring      | `opencode-plugin/src/index.ts`              |
 | OpenClaw wiring      | `openclaw-plugin/index.ts`                  |
@@ -158,11 +196,17 @@ Use the local file when you work in these areas:
 - `openclaw-plugin/AGENTS.md`
 - `opencode-plugin/AGENTS.md`
 - `claude-plugin/AGENTS.md`
+- `codex-plugin/AGENTS.md`
 - `site/AGENTS.md`
 - `dashboard/app/AGENTS.md`
 - `e2e/AGENTS.md`
-- `k8s/AGENTS.md`
 - `benchmark/MR-NIAH/AGENTS.md`
+
+Validate this map after editing:
+
+```bash
+python3 -c 'from pathlib import Path; import re, subprocess; text = Path("AGENTS.md").read_text(); paths = re.findall(r"`([^`]+/AGENTS\.md)`", text); tracked = set(subprocess.check_output(["git", "ls-files", "*AGENTS.md"], text=True).splitlines()); missing = [p for p in paths if p not in tracked]; print("\n".join(missing)); raise SystemExit(1 if missing else 0)'
+```
 
 ## GitHub access
 
@@ -181,8 +225,28 @@ gh issue view <number> --comments
 gh pr view <number> --comments
 ```
 
+### Review loop approval policy
+
+When the user names a specific PR and says `run the review loop`, `use the loop
+to resolve review comments`, or equivalent wording, treat that as approval for a
+bounded review-comment resolution loop on that PR.
+
+This approval covers only actions required by the loop:
+
+1. Commit changes that directly address review feedback.
+2. Push those commits to the PR branch.
+3. Post GitHub review-thread replies.
+4. Resolve fixed GitHub review threads.
+5. Post the configured GitHub reviewer trigger comment, such as `@codex review`.
+6. Repeat the same sequence until the loop reaches its configured stop condition.
+
+This approval does not cover force-pushes, rebases, merges, creating new PRs,
+deployments, deleting files outside the working tree, or unrelated code changes.
+Stop and ask before those actions. Stop and ask if a review comment requires a
+product or architecture decision that is not clearly implied by the PR.
+
 ## Explicitly absent
 
 - No `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` were found.
-- No TypeScript test runner is configured for the plugin packages.
-- No repo-wide lint config exists for the TypeScript code.
+- No repo-wide TypeScript test runner is configured; plugin tests are package-local.
+- No repo-wide TypeScript lint config exists, and the plugin packages do not expose `lint` scripts.

@@ -1,7 +1,15 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/qiffang/mnemos/server/internal/domain"
 )
 
 func TestChunkMessages(t *testing.T) {
@@ -76,9 +84,9 @@ func TestChunkMessages(t *testing.T) {
 	}
 }
 
-func TestMarshalMetadata(t *testing.T) {
+func TestMarshalImportedMemoryMetadata(t *testing.T) {
 	t.Run("nil metadata", func(t *testing.T) {
-		raw, err := marshalMetadata(nil)
+		raw, err := marshalImportedMemoryMetadata(nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -89,7 +97,7 @@ func TestMarshalMetadata(t *testing.T) {
 
 	t.Run("non-nil metadata", func(t *testing.T) {
 		m := map[string]any{"key": "value", "num": 42.0}
-		raw, err := marshalMetadata(m)
+		raw, err := marshalImportedMemoryMetadata(m)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -102,6 +110,138 @@ func TestMarshalMetadata(t *testing.T) {
 			t.Errorf("unexpected empty result: %s", s)
 		}
 	})
+
+	for _, tt := range []struct {
+		name     string
+		reserved any
+	}{
+		{
+			name: "valid reserved envelope",
+			reserved: map[string]any{
+				"schema":            ExternalProvenanceSchema,
+				"source_message_id": "message_imported",
+			},
+		},
+		{name: "malformed reserved envelope", reserved: "untrusted"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := marshalImportedMemoryMetadata(map[string]any{
+				"external_provenance": tt.reserved,
+				"generic":             "preserved",
+			})
+			if err == nil {
+				t.Fatal("expected reserved external_provenance to be rejected")
+			}
+			var validationErr *domain.ValidationError
+			if !errors.As(err, &validationErr) {
+				t.Fatalf("error = %T, want ValidationError", err)
+			}
+			if validationErr.Field != "metadata.external_provenance" {
+				t.Fatalf("field = %q, want metadata.external_provenance", validationErr.Field)
+			}
+		})
+	}
+}
+
+func TestNormalizeUploadAppID(t *testing.T) {
+	got, err := normalizeUploadAppID("  app-a  ", "appId")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "app-a" {
+		t.Fatalf("appID = %q, want app-a", got)
+	}
+
+	got, err = normalizeUploadAppID(" \t ", "appId")
+	if err != nil {
+		t.Fatalf("unexpected error for blank appID: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("blank appID = %q, want empty", got)
+	}
+
+	_, err = normalizeUploadAppID(strings.Repeat("x", 101), "memories[0].appId")
+	if err == nil {
+		t.Fatal("expected validation error for oversized appID")
+	}
+	var ve *domain.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("error = %T, want ValidationError", err)
+	}
+	if ve.Field != "memories[0].appId" {
+		t.Fatalf("field = %q, want memories[0].appId", ve.Field)
+	}
+}
+
+func TestParseMemoryFilePreservesEntryDefaultAppIDOverride(t *testing.T) {
+	file, err := parseMemoryFile([]byte(`{
+		"agent_id": "agent-a",
+		"appId": "file-app",
+		"memories": [
+			{"content": "inherits file app"},
+			{"content": "explicit empty app", "appId": ""},
+			{"content": "explicit null app", "appId": null},
+			{"content": "explicit legacy empty app", "app_id": ""},
+			{"content": "explicit entry app", "appId": "entry-app"}
+		]
+	}`), "fallback-agent")
+	if err != nil {
+		t.Fatalf("parse memory file: %v", err)
+	}
+	fileAppID, ok := resolveUploadAppID(file.AppID, file.appIDSet, file.AppIDLegacy, file.appIDLegacySet)
+	if !ok || fileAppID != "file-app" {
+		t.Fatalf("file appID = %q, ok = %v, want file-app/true", fileAppID, ok)
+	}
+
+	got := make([]string, 0, len(file.Memories))
+	for _, entry := range file.Memories {
+		appID := fileAppID
+		if entryAppID, ok := resolveUploadAppID(entry.AppID, entry.appIDSet, entry.AppIDLegacy, entry.appIDLegacySet); ok {
+			appID = entryAppID
+		}
+		got = append(got, appID)
+	}
+
+	want := []string{"file-app", "", "", "", "entry-app"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d memories, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("memory[%d] appID = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseUploadFileAppIDPrefersExplicitDefaultOverLegacy(t *testing.T) {
+	memoryFile, err := parseMemoryFile([]byte(`{
+		"agent_id": "agent-a",
+		"appId": null,
+		"app_id": "legacy-app",
+		"memories": [{"content": "uses default app"}]
+	}`), "fallback-agent")
+	if err != nil {
+		t.Fatalf("parse memory file: %v", err)
+	}
+	appID, ok := resolveUploadAppID(memoryFile.AppID, memoryFile.appIDSet, memoryFile.AppIDLegacy, memoryFile.appIDLegacySet)
+	if !ok || appID != "" {
+		t.Fatalf("memory file appID = %q, ok = %v, want empty/true", appID, ok)
+	}
+
+	sessionFile, err := parseSessionFile([]byte(`{
+		"agent_id": "agent-a",
+		"session_id": "session-a",
+		"appId": "",
+		"app_id": "legacy-app",
+		"messages": [{"role": "user", "content": "hello"}]
+	}`))
+	if err != nil {
+		t.Fatalf("parse session file: %v", err)
+	}
+	appID, ok = resolveUploadAppID(sessionFile.AppID, sessionFile.appIDSet, sessionFile.AppIDLegacy, sessionFile.appIDLegacySet)
+	if !ok || appID != "" {
+		t.Fatalf("session file appID = %q, ok = %v, want empty/true", appID, ok)
+	}
 }
 
 func TestParseSessionFile(t *testing.T) {
@@ -248,6 +388,165 @@ func TestParseMemoryFile(t *testing.T) {
 				t.Errorf("content = %q, want %q", file.Memories[0].Content, tt.wantContent)
 			}
 		})
+	}
+}
+
+func TestParseMemoryFileRejectsReservedExternalProvenanceBeforeImport(t *testing.T) {
+	entries := make([]MemoryFileEntry, uploadMemoryBatchSize+1)
+	for i := range entries {
+		entries[i].Content = "safe imported memory"
+	}
+	entries[uploadMemoryBatchSize].Metadata = map[string]any{
+		"external_provenance": map[string]any{
+			"schema":            ExternalProvenanceSchema,
+			"source_message_id": "message_imported",
+		},
+	}
+	payload, marshalErr := json.Marshal(MemoryFile{AgentID: "agent-a", Memories: entries})
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+
+	_, err := parseMemoryFile(payload, "fallback-agent")
+	if err == nil {
+		t.Fatal("expected memory import with reserved external_provenance to fail")
+	}
+	wantPath := fmt.Sprintf("memories[%d]", uploadMemoryBatchSize)
+	if !strings.Contains(err.Error(), wantPath) {
+		t.Fatalf("error = %q, want indexed path %s", err, wantPath)
+	}
+	var validationErr *domain.ValidationError
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("error = %T, want ValidationError", err)
+	}
+	if validationErr.Field != "metadata.external_provenance" {
+		t.Fatalf("field = %q, want metadata.external_provenance", validationErr.Field)
+	}
+}
+
+func TestUploadWorkerRecordActivity(t *testing.T) {
+	repo := &activityTenantRepo{count: 1}
+	worker := &UploadWorker{activity: NewActivityTracker(repo, nil)}
+
+	worker.recordActivity("tenant-a")
+
+	repo.mu.Lock()
+	touchCalls := repo.touchCalls
+	countCalls := repo.countCalls
+	repo.mu.Unlock()
+	if touchCalls != 1 || countCalls != 1 {
+		t.Fatalf("calls = touch:%d count:%d, want 1/1", touchCalls, countCalls)
+	}
+}
+
+func TestUploadWorkerRecordActivityOnlyDoesNotRefresh(t *testing.T) {
+	repo := &activityTenantRepo{count: 1}
+	worker := &UploadWorker{activity: NewActivityTracker(repo, nil)}
+
+	worker.recordActivityOnly("tenant-a")
+
+	repo.mu.Lock()
+	touchCalls := repo.touchCalls
+	countCalls := repo.countCalls
+	sumCalls := repo.sumCalls
+	repo.mu.Unlock()
+	if touchCalls != 1 || countCalls != 0 || sumCalls != 0 {
+		t.Fatalf("calls = touch:%d count:%d sum:%d, want 1/0/0", touchCalls, countCalls, sumCalls)
+	}
+}
+
+type uploadMemoryStatsRepo struct {
+	memoryRepoMock
+	total  int64
+	last7d int64
+	err    error
+}
+
+func (r *uploadMemoryStatsRepo) CountStats(context.Context) (int64, int64, error) {
+	return r.total, r.last7d, r.err
+}
+
+func TestUploadWorkerRecordMemoryStats(t *testing.T) {
+	repo := &activityTenantRepo{count: 1, memoryTotal: 7, memoryLast7d: 3}
+	worker := &UploadWorker{activity: NewActivityTracker(repo, nil)}
+	memRepo := &uploadMemoryStatsRepo{total: 7, last7d: 3}
+
+	worker.recordMemoryStats(context.Background(), "tenant-a", memRepo)
+
+	repo.mu.Lock()
+	upsertCalls := repo.upsertCalls
+	touchCalls := repo.touchCalls
+	statsTotal := repo.lastStatsTotal
+	statsLast7d := repo.lastStatsLast7d
+	repo.mu.Unlock()
+	if upsertCalls != 1 || touchCalls != 0 || statsTotal != 7 || statsLast7d != 3 {
+		t.Fatalf("calls = upsert:%d touch:%d stats:%d/%d, want 1/0/7/3", upsertCalls, touchCalls, statsTotal, statsLast7d)
+	}
+}
+
+func TestUploadWorkerRecordMemoryStatsFallsBackToActivity(t *testing.T) {
+	repo := &activityTenantRepo{count: 1}
+	worker := &UploadWorker{activity: NewActivityTracker(repo, nil)}
+	memRepo := &uploadMemoryStatsRepo{err: errors.New("count failed")}
+
+	worker.recordMemoryStats(context.Background(), "tenant-a", memRepo)
+
+	repo.mu.Lock()
+	upsertCalls := repo.upsertCalls
+	touchCalls := repo.touchCalls
+	repo.mu.Unlock()
+	if upsertCalls != 0 || touchCalls != 1 {
+		t.Fatalf("calls = upsert:%d touch:%d, want 0/1", upsertCalls, touchCalls)
+	}
+}
+
+type uploadTaskStatusRepo struct {
+	status   domain.TaskStatus
+	errorMsg string
+}
+
+func (r *uploadTaskStatusRepo) Create(context.Context, *domain.UploadTask) error { return nil }
+
+func (r *uploadTaskStatusRepo) GetByID(context.Context, string) (*domain.UploadTask, error) {
+	return nil, nil
+}
+
+func (r *uploadTaskStatusRepo) ListByTenant(context.Context, string) ([]domain.UploadTask, error) {
+	return nil, nil
+}
+
+func (r *uploadTaskStatusRepo) UpdateStatus(_ context.Context, _ string, status domain.TaskStatus, errorMsg string) error {
+	r.status = status
+	r.errorMsg = errorMsg
+	return nil
+}
+
+func (r *uploadTaskStatusRepo) UpdateProgress(context.Context, string, int) error { return nil }
+
+func (r *uploadTaskStatusRepo) UpdateTotalChunks(context.Context, string, int) error { return nil }
+
+func (r *uploadTaskStatusRepo) FetchPending(context.Context, int) ([]domain.UploadTask, error) {
+	return nil, nil
+}
+
+func (r *uploadTaskStatusRepo) ResetProcessing(context.Context, time.Duration) (int64, error) {
+	return 0, nil
+}
+
+func TestUploadWorkerRequeueTaskKeepsPending(t *testing.T) {
+	repo := &uploadTaskStatusRepo{}
+	worker := &UploadWorker{tasks: repo}
+	task := domain.UploadTask{TaskID: "task-a"}
+
+	err := worker.requeueTask(context.Background(), task, errors.New("schema not ready"), nil)
+	if err == nil {
+		t.Fatal("expected requeueTask to return original error")
+	}
+	if repo.status != domain.TaskPending {
+		t.Fatalf("status = %q, want pending", repo.status)
+	}
+	if repo.errorMsg != "" {
+		t.Fatalf("error message = %q, want empty", repo.errorMsg)
 	}
 }
 

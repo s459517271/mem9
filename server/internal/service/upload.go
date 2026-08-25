@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -28,24 +29,72 @@ const defaultTaskTimeout = 30 * time.Minute
 
 // SessionFile is the expected JSON format for session file uploads.
 type SessionFile struct {
-	AgentID   string          `json:"agent_id"`
-	SessionID string          `json:"session_id"`
-	Messages  []IngestMessage `json:"messages"`
+	AgentID     string          `json:"agent_id"`
+	AppID       string          `json:"appId"`
+	AppIDLegacy string          `json:"app_id"`
+	SessionID   string          `json:"session_id"`
+	Messages    []IngestMessage `json:"messages"`
+
+	appIDSet       bool
+	appIDLegacySet bool
 }
 
 // MemoryFile is the expected JSON format for memory file uploads.
 type MemoryFile struct {
-	AgentID  string            `json:"agent_id"`
-	Memories []MemoryFileEntry `json:"memories"`
+	AgentID     string            `json:"agent_id"`
+	AppID       string            `json:"appId"`
+	AppIDLegacy string            `json:"app_id"`
+	Memories    []MemoryFileEntry `json:"memories"`
+
+	appIDSet       bool
+	appIDLegacySet bool
 }
 
 // MemoryFileEntry is a single memory entry in a memory file.
 type MemoryFileEntry struct {
-	Content    string         `json:"content"`
-	Source     string         `json:"source,omitempty"`
-	Tags       []string       `json:"tags,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	MemoryType string         `json:"memory_type,omitempty"`
+	Content     string         `json:"content"`
+	AppID       string         `json:"appId,omitempty"`
+	AppIDLegacy string         `json:"app_id,omitempty"`
+	Source      string         `json:"source,omitempty"`
+	Tags        []string       `json:"tags,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	MemoryType  string         `json:"memory_type,omitempty"`
+
+	appIDSet       bool
+	appIDLegacySet bool
+}
+
+type sessionFileJSON SessionFile
+
+func (f *SessionFile) UnmarshalJSON(data []byte) error {
+	var parsed sessionFileJSON
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	*f = SessionFile(parsed)
+	return decodeUploadAppIDFields(data, &f.AppID, &f.appIDSet, &f.AppIDLegacy, &f.appIDLegacySet)
+}
+
+type memoryFileJSON MemoryFile
+
+func (f *MemoryFile) UnmarshalJSON(data []byte) error {
+	var parsed memoryFileJSON
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	*f = MemoryFile(parsed)
+	return decodeUploadAppIDFields(data, &f.AppID, &f.appIDSet, &f.AppIDLegacy, &f.appIDLegacySet)
+}
+
+type memoryFileEntryJSON MemoryFileEntry
+
+func (e *MemoryFileEntry) UnmarshalJSON(data []byte) error {
+	var parsed memoryFileEntryJSON
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	*e = MemoryFileEntry(parsed)
+	return decodeUploadAppIDFields(data, &e.AppID, &e.appIDSet, &e.AppIDLegacy, &e.appIDLegacySet)
 }
 
 // UploadWorker processes queued upload tasks.
@@ -56,12 +105,16 @@ type UploadWorker struct {
 	embedder     *embed.Embedder
 	llmClient    *llm.Client
 	autoModel    string
+	autoDims     int
+	clientDims   int
 	ftsEnabled   bool
 	mode         IngestMode
 	logger       *slog.Logger
 	pollInterval time.Duration
 	concurrency  int
 	encryptor    encrypt.Encryptor
+	activity     *ActivityTracker
+	ingestOpts   []IngestOption
 }
 
 // NewUploadWorker creates a new UploadWorker.
@@ -72,11 +125,15 @@ func NewUploadWorker(
 	embedder *embed.Embedder,
 	llmClient *llm.Client,
 	autoModel string,
+	autoDims int,
+	clientDims int,
 	ftsEnabled bool,
 	mode IngestMode,
 	logger *slog.Logger,
 	concurrency int,
 	encryptor encrypt.Encryptor,
+	activity *ActivityTracker,
+	ingestOptions ...IngestOption,
 ) *UploadWorker {
 	if logger == nil {
 		logger = slog.Default()
@@ -91,12 +148,16 @@ func NewUploadWorker(
 		embedder:     embedder,
 		llmClient:    llmClient,
 		autoModel:    autoModel,
+		autoDims:     autoDims,
+		clientDims:   clientDims,
 		ftsEnabled:   ftsEnabled,
 		mode:         mode,
 		logger:       logger,
 		pollInterval: 5 * time.Second,
 		concurrency:  concurrency,
 		encryptor:    encryptor,
+		activity:     activity,
+		ingestOpts:   append([]IngestOption(nil), ingestOptions...),
 	}
 }
 
@@ -183,9 +244,12 @@ func (w *UploadWorker) processTask(ctx context.Context, task domain.UploadTask) 
 	if err != nil {
 		return w.failTask(ctx, task, fmt.Errorf("get tenant db: %w", err), logger)
 	}
+	if err := w.ensureRuntimeSchema(taskCtx, db); err != nil {
+		return w.requeueTask(ctx, task, fmt.Errorf("ensure runtime schema: %w", err), logger)
+	}
 
 	memRepo := repository.NewMemoryRepo(w.pool.Backend(), db, w.autoModel, w.ftsEnabled, tenantInfo.ClusterID)
-	ingestSvc := NewIngestService(memRepo, w.llmClient, w.embedder, w.autoModel, w.mode)
+	ingestSvc := NewIngestService(memRepo, w.llmClient, w.embedder, w.autoModel, w.mode, w.ingestOpts...)
 
 	data, err := os.ReadFile(task.FilePath)
 	if err != nil {
@@ -214,6 +278,11 @@ func (w *UploadWorker) processTask(ctx context.Context, task domain.UploadTask) 
 		}
 		if file.AgentID == "" {
 			file.AgentID = task.AgentID
+		}
+		rawFileAppID, _ := resolveUploadAppID(file.AppID, file.appIDSet, file.AppIDLegacy, file.appIDLegacySet)
+		fileAppID, err := normalizeUploadAppID(rawFileAppID, "appId")
+		if err != nil {
+			return w.failTask(ctx, task, fmt.Errorf("validate session app_id: %w", err), logger)
 		}
 		if file.SessionID == "" {
 			file.SessionID = task.SessionID
@@ -247,12 +316,18 @@ func (w *UploadWorker) processTask(ctx context.Context, task domain.UploadTask) 
 			}
 			_, err := ingestSvc.Ingest(taskCtx, agentName, IngestRequest{
 				AgentID:   file.AgentID,
+				AppID:     fileAppID,
 				SessionID: file.SessionID,
 				Messages:  chunk,
 				Mode:      w.mode,
 			})
 			if err != nil {
 				return w.failTask(ctx, task, fmt.Errorf("ingest session chunk: %w", err), logger)
+			}
+			if i == len(chunks)-1 {
+				w.recordMemoryStats(taskCtx, task.TenantID, memRepo)
+			} else {
+				w.recordActivityOnly(task.TenantID)
 			}
 			doneChunks = i + 1
 		}
@@ -261,6 +336,11 @@ func (w *UploadWorker) processTask(ctx context.Context, task domain.UploadTask) 
 		file, err := parseMemoryFile(data, task.AgentID)
 		if err != nil {
 			return w.failTask(ctx, task, fmt.Errorf("parse memory file: %w", err), logger)
+		}
+		rawFileAppID, _ := resolveUploadAppID(file.AppID, file.appIDSet, file.AppIDLegacy, file.appIDLegacySet)
+		fileAppID, err := normalizeUploadAppID(rawFileAppID, "appId")
+		if err != nil {
+			return w.failTask(ctx, task, fmt.Errorf("validate memory app_id: %w", err), logger)
 		}
 
 		// Handle empty file: mark done immediately
@@ -295,10 +375,17 @@ func (w *UploadWorker) processTask(ctx context.Context, task domain.UploadTask) 
 			}
 			batch := file.Memories[i:end]
 			memories := make([]*domain.Memory, 0, len(batch))
-			for _, entry := range batch {
-				metadata, err := marshalMetadata(entry.Metadata)
+			for j, entry := range batch {
+				appID := fileAppID
+				if entryAppID, ok := resolveUploadAppID(entry.AppID, entry.appIDSet, entry.AppIDLegacy, entry.appIDLegacySet); ok {
+					appID, err = normalizeUploadAppID(entryAppID, fmt.Sprintf("memories[%d].appId", i+j))
+					if err != nil {
+						return w.failTask(ctx, task, fmt.Errorf("validate memory app_id: %w", err), logger)
+					}
+				}
+				metadata, err := marshalImportedMemoryMetadata(entry.Metadata)
 				if err != nil {
-					return w.failTask(ctx, task, fmt.Errorf("marshal memory metadata: %w", err), logger)
+					return w.failTask(ctx, task, fmt.Errorf("validate memories[%d] metadata: %w", i+j, err), logger)
 				}
 				memType := domain.TypeInsight
 				if entry.MemoryType != "" {
@@ -312,6 +399,7 @@ func (w *UploadWorker) processTask(ctx context.Context, task domain.UploadTask) 
 					Metadata:   metadata,
 					MemoryType: memType,
 					AgentID:    file.AgentID,
+					AppID:      appID,
 					State:      domain.StateActive,
 					Version:    1,
 					UpdatedBy:  agentName,
@@ -328,9 +416,10 @@ func (w *UploadWorker) processTask(ctx context.Context, task domain.UploadTask) 
 				clusterID = "default"
 			}
 			metrics.MemoryChangesTotal.WithLabelValues(clusterID).Add(float64(len(memories)))
-			if total, last7d, err := memRepo.CountStats(taskCtx); err == nil {
-				metrics.ActiveMemoryTotal.WithLabelValues(clusterID).Set(float64(total))
-				metrics.ActiveMemory7dTotal.WithLabelValues(clusterID).Set(float64(last7d))
+			if batchIdx == totalBatches-1 {
+				w.recordMemoryStats(taskCtx, task.TenantID, memRepo)
+			} else {
+				w.recordActivityOnly(task.TenantID)
 			}
 			batchIdx++
 			doneChunks = batchIdx
@@ -351,6 +440,66 @@ func (w *UploadWorker) processTask(ctx context.Context, task domain.UploadTask) 
 	logger.Info("upload task completed", "task_id", task.TaskID)
 	return nil
 
+}
+
+func (w *UploadWorker) recordActivity(tenantID string) {
+	if w == nil || w.activity == nil {
+		return
+	}
+	w.activity.RecordMemoryActivity(tenantID, time.Now().UTC())
+}
+
+func (w *UploadWorker) ensureRuntimeSchema(ctx context.Context, db *sql.DB) error {
+	backend := "tidb"
+	if w.pool != nil {
+		backend = w.pool.Backend()
+	}
+	switch backend {
+	case "tidb":
+		return tenant.EnsureTiDBTenantRuntimeSchema(ctx, db, w.autoModel, w.autoDims, w.clientDims, w.ftsEnabled)
+	case "postgres", "db9":
+		return tenant.ValidatePostgresMemoryRuntimeSchema(ctx, db, backend)
+	default:
+		return fmt.Errorf("unsupported backend %q", backend)
+	}
+}
+
+func (w *UploadWorker) requeueTask(ctx context.Context, task domain.UploadTask, err error, logger *slog.Logger) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if updateErr := w.tasks.UpdateStatus(ctx, task.TaskID, domain.TaskPending, ""); updateErr != nil {
+		logger.Error("failed to requeue upload task", "task_id", task.TaskID, "err", updateErr)
+		return err
+	}
+	logger.Warn("upload task requeued", "task_id", task.TaskID, "err", err)
+	return err
+}
+
+func (w *UploadWorker) recordActivityOnly(tenantID string) {
+	if w == nil || w.activity == nil {
+		return
+	}
+	w.activity.RecordMemoryActivityOnly(tenantID, time.Now().UTC())
+}
+
+func (w *UploadWorker) recordMemoryStats(ctx context.Context, tenantID string, memRepo repository.MemoryRepo) {
+	if w == nil || w.activity == nil || memRepo == nil {
+		return
+	}
+
+	observedAt := time.Now().UTC()
+	total, last7d, err := memRepo.CountStats(ctx)
+	if err != nil {
+		logger := w.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("upload memory stats skipped: count stats failed", "tenant_id", tenantID, "err", err)
+		w.recordActivity(tenantID)
+		return
+	}
+	w.activity.RecordMemoryStats(ctx, tenantID, observedAt, total, last7d, observedAt)
 }
 
 // failTask marks task as failed and cleans up the file.
@@ -384,7 +533,13 @@ func (w *UploadWorker) cleanupFile(task domain.UploadTask, logger *slog.Logger) 
 	}
 }
 
-func marshalMetadata(metadata map[string]any) (json.RawMessage, error) {
+// marshalImportedMemoryMetadata keeps the reserved external provenance envelope exclusive to
+// validated message ingest. A generic memory import has no source message against which the
+// envelope can be validated, so any occurrence of the reserved key must fail the task.
+func marshalImportedMemoryMetadata(metadata map[string]any) (json.RawMessage, error) {
+	if err := validateImportedMemoryMetadata(metadata); err != nil {
+		return nil, err
+	}
 	if metadata == nil {
 		return nil, nil
 	}
@@ -395,6 +550,16 @@ func marshalMetadata(metadata map[string]any) (json.RawMessage, error) {
 	return json.RawMessage(b), nil
 }
 
+func validateImportedMemoryMetadata(metadata map[string]any) error {
+	if _, present := metadata[externalProvenanceKey]; present {
+		return &domain.ValidationError{
+			Field:   "metadata.external_provenance",
+			Message: "is reserved for validated message ingest",
+		}
+	}
+	return nil
+}
+
 // parseMemoryFile parses upload data as a MemoryFile.
 // It accepts two formats:
 //   - JSON: {"agent_id":"...","memories":[{"content":"..."},...]}
@@ -402,6 +567,14 @@ func marshalMetadata(metadata map[string]any) (json.RawMessage, error) {
 func parseMemoryFile(data []byte, fallbackAgentID string) (MemoryFile, error) {
 	var file MemoryFile
 	if err := json.Unmarshal(data, &file); err == nil && len(file.Memories) > 0 {
+		// Validate the whole import before the worker starts batching writes. Keeping this
+		// check here prevents a reserved envelope in a later batch from leaving a partially
+		// imported file behind; the per-entry write-path check remains defense in depth.
+		for i, entry := range file.Memories {
+			if err := validateImportedMemoryMetadata(entry.Metadata); err != nil {
+				return MemoryFile{}, fmt.Errorf("validate memories[%d] metadata: %w", i, err)
+			}
+		}
 		if file.AgentID == "" {
 			file.AgentID = fallbackAgentID
 		}
@@ -421,13 +594,66 @@ func parseMemoryFile(data []byte, fallbackAgentID string) (MemoryFile, error) {
 	}, nil
 }
 
+func normalizeUploadAppID(value string, field string) (string, error) {
+	value = strings.TrimSpace(value)
+	if len(value) > 100 {
+		return "", &domain.ValidationError{Field: field, Message: "too long (max 100)"}
+	}
+	return value, nil
+}
+
+func decodeUploadAppIDFields(data []byte, appID *string, appIDSet *bool, legacyAppID *string, legacyAppIDSet *bool) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if rawAppID, ok := raw["appId"]; ok {
+		value, err := decodeUploadAppIDField(rawAppID)
+		if err != nil {
+			return err
+		}
+		*appID = value
+		*appIDSet = true
+	}
+	if rawAppID, ok := raw["app_id"]; ok {
+		value, err := decodeUploadAppIDField(rawAppID)
+		if err != nil {
+			return err
+		}
+		*legacyAppID = value
+		*legacyAppIDSet = true
+	}
+	return nil
+}
+
+func decodeUploadAppIDField(raw json.RawMessage) (string, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return "", nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func resolveUploadAppID(appID string, appIDSet bool, legacyAppID string, legacyAppIDSet bool) (string, bool) {
+	if appIDSet {
+		return appID, true
+	}
+	if legacyAppIDSet {
+		return legacyAppID, true
+	}
+	return "", false
+}
+
 // parseSessionFile tries to parse data as a JSON SessionFile first.
 // If that fails, it tries JSONL format (one JSON object per line).
 // Supports both simple {role, content} lines and OpenClaw's nested
 // format: {"type":"message","message":{"role":"...","content":[...]}}.
 func parseSessionFile(data []byte) (SessionFile, error) {
 	var file SessionFile
-	if err := json.Unmarshal(data, &file); err == nil && (len(file.Messages) > 0 || file.AgentID != "" || file.SessionID != "") {
+	if err := json.Unmarshal(data, &file); err == nil && (len(file.Messages) > 0 || file.AgentID != "" || file.SessionID != "" || file.appIDSet || file.appIDLegacySet) {
 		return file, nil
 	}
 

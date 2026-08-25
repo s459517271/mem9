@@ -206,3 +206,83 @@ func TestBuildRecallConfidence_TimeFutureIntentPrefersPlannedFutureEvidence(t *t
 		t.Fatalf("expected future-planning evidence to outrank past event for future time query: future=%d past=%d", gotFuture, gotPast)
 	}
 }
+
+func TestBuildRecallConfidence_AllowsKeywordOnlyInsightHits(t *testing.T) {
+	profile := buildRecallQueryProfile("Bosn")
+	candidate := service.RecallCandidate{
+		Memory: domain.Memory{
+			ID:         "m1",
+			Content:    "Flame loves Bosn",
+			MemoryType: domain.TypeInsight,
+			UpdatedAt:  time.Now(),
+		},
+		SourcePool: service.RecallSourceInsight,
+		RRFScore:   1.0 / 61.0,
+		InKeyword:  true,
+	}
+
+	confidence := buildRecallConfidence(profile, candidate)
+	if confidence < defaultMixedMinConfidence {
+		t.Fatalf("keyword-only insight confidence = %d, want >= %d", confidence, defaultMixedMinConfidence)
+	}
+}
+
+func TestBuildRecallConfidence_AllowsKeywordOnlyInsightQuestionHits(t *testing.T) {
+	profile := buildRecallQueryProfile("Does Bosn love Flame?")
+	candidate := service.RecallCandidate{
+		Memory: domain.Memory{
+			ID:         "m1",
+			Content:    "Bosn loves Flame",
+			MemoryType: domain.TypeInsight,
+			UpdatedAt:  time.Now(),
+		},
+		SourcePool: service.RecallSourceInsight,
+		RRFScore:   1.0 / 61.0,
+		InKeyword:  true,
+	}
+
+	confidence := buildRecallConfidence(profile, candidate)
+	if confidence < defaultMixedMinConfidence {
+		t.Fatalf("keyword-only insight question confidence = %d, want >= %d", confidence, defaultMixedMinConfidence)
+	}
+}
+
+func TestBuildRecallConfidence_AllowsKeywordOnlyPinnedIdentifierHits(t *testing.T) {
+	profile := buildRecallQueryProfile("codex-appid-e2e-20260602154502")
+	candidate := service.RecallCandidate{
+		Memory: domain.Memory{
+			ID:         "p1",
+			Content:    "codex-appid-e2e-20260602154502 isolated app B memory",
+			MemoryType: domain.TypePinned,
+			UpdatedAt:  time.Now(),
+		},
+		SourcePool: service.RecallSourcePinned,
+		RRFScore:   1.0 / 61.0,
+		InKeyword:  true,
+	}
+
+	confidence := buildRecallConfidence(profile, candidate)
+	if confidence < defaultPinnedMinConfidence {
+		t.Fatalf("keyword-only pinned identifier confidence = %d, want >= %d", confidence, defaultPinnedMinConfidence)
+	}
+}
+
+func TestRecallCandidateOptions_EnumerationExpandsAdjacentTurns(t *testing.T) {
+	opts := recallCandidateOptions(recallQueryShapeEnumeration, true)
+
+	if !opts.EnableAdjacentTurns {
+		t.Fatal("enumeration recall should expand adjacent session turns")
+	}
+	if opts.AdjacentTurnRadius != sessionAdjacentTurnRadius {
+		t.Fatalf("adjacent radius = %d, want %d", opts.AdjacentTurnRadius, sessionAdjacentTurnRadius)
+	}
+	if opts.AdjacentTurnTopN != enumerationAdjacentTurnTopN {
+		t.Fatalf("adjacent topN = %d, want %d", opts.AdjacentTurnTopN, enumerationAdjacentTurnTopN)
+	}
+	if opts.FetchMultiplier != enumerationFetchMultiplier {
+		t.Fatalf("fetch multiplier = %d, want %d", opts.FetchMultiplier, enumerationFetchMultiplier)
+	}
+	if opts.SecondHopTopN != enumerationSecondHopTopN {
+		t.Fatalf("second hop topN = %d, want %d", opts.SecondHopTopN, enumerationSecondHopTopN)
+	}
+}

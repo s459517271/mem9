@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   Search,
   BarChart3,
@@ -37,6 +37,7 @@ import { maskSpaceId } from "@/lib/session";
 import type { Memory } from "@/types/memory";
 import type { SpaceRouteState } from "./use-space-route-state";
 import type { SpaceDataModel } from "./use-space-data-model";
+import type { MemoryInsightTab } from "@/lib/memory-insight";
 import {
   formatAnalysisCategoryLabel,
   getActiveFilterCount,
@@ -101,6 +102,11 @@ export const SpacePageLayout = ({
   onRefreshMemories,
   onHandleFarmAction,
 }: SpacePageLayoutProps) => {
+  const [activeOverviewTab, setActiveOverviewTab] = useState<MemoryInsightTab>("profile");
+  const isMemoryListTab = activeOverviewTab === "pulse";
+  const supportsMemoryDetail = isMemoryListTab || activeOverviewTab === "insight";
+  const selectedMemoryForDetail = supportsMemoryDetail ? routeState.selected : null;
+  const showSelectedMemoryDetail = selectedMemoryForDetail !== null;
   const isEmpty =
     !dataModel.isMemoryLoading &&
     dataModel.displayedMemories.length === 0 &&
@@ -120,7 +126,7 @@ export const SpacePageLayout = ({
   });
   const pageShellClass = getPageShellClass(
     features.enableAnalysis,
-    routeState.selected !== null,
+    showSelectedMemoryDetail,
   );
 
   return (
@@ -169,18 +175,11 @@ export const SpacePageLayout = ({
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="grid flex-1 grid-cols-3 gap-2">
-                    <button
-                      onClick={() =>
-                        routeState.search.type
-                          ? routeState.clearTypeFilter()
-                          : undefined
-                      }
-                      data-mp-event="Dashboard/Space/TotalStatClicked"
-                      data-mp-page-name="space"
+                    <div
                       className={`rounded-xl border px-3 py-2.5 text-left transition-all ${
                         !routeState.search.type
                           ? "border-foreground/15 bg-foreground/[0.03]"
-                          : "border-transparent hover:border-foreground/10"
+                          : "border-transparent"
                       }`}
                     >
                       <div className="text-xl font-bold tracking-tight text-foreground">
@@ -189,17 +188,14 @@ export const SpacePageLayout = ({
                       <div className="mt-0.5 text-xs text-muted-foreground">
                         {t("space.stats.total")}
                       </div>
-                    </button>
+                    </div>
 
-                    <button
-                      onClick={() => routeState.handleTypeClick("pinned")}
-                      data-mp-event="Dashboard/Space/PinnedStatClicked"
-                      data-mp-page-name="space"
+                    <div
                       data-mp-memory-type="pinned"
                       className={`rounded-xl border px-3 py-2.5 text-left transition-all ${
                         routeState.search.type === "pinned"
                           ? "border-type-pinned/30 bg-type-pinned/5"
-                          : "border-transparent hover:border-type-pinned/20"
+                          : "border-transparent"
                       }`}
                     >
                       <div className="flex items-baseline gap-1.5">
@@ -214,17 +210,14 @@ export const SpacePageLayout = ({
                       <div className="mt-0.5 text-[10px] leading-tight text-soft-foreground">
                         {t("legend.pinned")}
                       </div>
-                    </button>
+                    </div>
 
-                    <button
-                      onClick={() => routeState.handleTypeClick("insight")}
-                      data-mp-event="Dashboard/Space/InsightStatClicked"
-                      data-mp-page-name="space"
+                    <div
                       data-mp-memory-type="insight"
                       className={`rounded-xl border px-3 py-2.5 text-left transition-all ${
                         routeState.search.type === "insight"
                           ? "border-type-insight/30 bg-type-insight/5"
-                          : "border-transparent hover:border-type-insight/20"
+                          : "border-transparent"
                       }`}
                     >
                       <div className="flex items-baseline gap-1.5">
@@ -239,7 +232,7 @@ export const SpacePageLayout = ({
                       <div className="mt-0.5 text-[10px] leading-tight text-soft-foreground">
                         {t("legend.insight")}
                       </div>
-                    </button>
+                    </div>
                   </div>
                   {features.enableTimeRange && !routeState.selected && (
                     <TimeRangeSelector
@@ -256,33 +249,30 @@ export const SpacePageLayout = ({
               spaceId={spaceId}
               stats={dataModel.stats}
               pulseMemories={dataModel.pulseMemories}
+              profileFacetData={dataModel.topicData}
               insightMemories={dataModel.analysis.sourceMemories}
               cards={dataModel.analysis.cards}
               snapshot={dataModel.analysis.state.snapshot}
               range={routeState.range}
               loading={!dataModel.stats || dataModel.analysis.sourceLoading}
-              compact={routeState.selected !== null && routeState.isDesktopViewport}
-              activeType={routeState.search.type}
+              compact={showSelectedMemoryDetail && routeState.isDesktopViewport}
               activeCategory={routeState.analysisCategory}
               activeTag={routeState.tag}
-              selectedTimeline={routeState.timelineSelection}
               matchMap={dataModel.analysis.matchMap}
-              onTypeSelect={(type) =>
-                navigateAndScrollToMemoryList(() => routeState.handleTypeClick(type))
-              }
-              onTagSelect={(tag) =>
-                navigateAndScrollToMemoryList(() => routeState.handleTagChange(tag))
-              }
               onMemorySelect={routeState.openMemoryDetail}
-              onTimelineSelect={(selection) =>
-                navigateAndScrollToMemoryList(() => routeState.handleTimelineSelect(selection))
-              }
-              onTimelineClear={routeState.handleTimelineClear}
               onEntitySearch={(query) =>
                 navigateAndScrollToMemoryList(() => routeState.handleEntitySearch(query))
               }
+              onTabChange={(nextTab) => {
+                setActiveOverviewTab(nextTab);
+                if (nextTab !== activeOverviewTab) {
+                  routeState.setSelected(null);
+                }
+              }}
             />
 
+            {isMemoryListTab && (
+              <>
             <div className="relative mt-5">
               <Search className="absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-soft-foreground" />
               <Input
@@ -479,7 +469,11 @@ export const SpacePageLayout = ({
 
             <div id="memory-list" className="mt-4 scroll-mt-20">
               {isEmpty ? (
-                <EmptyState t={t} onAdd={() => setAddOpen(true)} />
+                <EmptyState
+                  t={t}
+                  onAdd={() => setAddOpen(true)}
+                  canAdd={features.enableManualAdd}
+                />
               ) : dataModel.displayedMemories.length === 0 && !dataModel.isMemoryLoading ? (
                 <div className="flex flex-col items-center justify-center gap-2 py-16">
                   <Search className="size-8 text-foreground/15" />
@@ -538,6 +532,8 @@ export const SpacePageLayout = ({
                 </div>
               )}
             </div>
+              </>
+            )}
           </div>
 
           {features.enableAnalysis && routeState.isDesktopViewport && (
@@ -572,20 +568,20 @@ export const SpacePageLayout = ({
             </div>
           )}
 
-          {routeState.selected &&
+          {showSelectedMemoryDetail &&
             routeState.isDesktopViewport &&
             routeState.selectedDetailMode === "panel" && (
               <DetailPanel
-                key={routeState.selected.id}
-                memory={routeState.selected}
-                derivedTags={dataModel.getActiveDerivedTags(routeState.selected)}
+                key={selectedMemoryForDetail.id}
+                memory={selectedMemoryForDetail}
+                derivedTags={dataModel.getActiveDerivedTags(selectedMemoryForDetail)}
                 sessionMessages={dataModel.selectedSessionMessages}
                 sessionMessagesLoading={dataModel.selectedSessionMessagesLoading}
                 onClose={() => routeState.setSelected(null)}
-                onDelete={() => setDeleteTarget(routeState.selected!)}
+                onDelete={() => setDeleteTarget(selectedMemoryForDetail)}
                 onEdit={
-                  routeState.selected.memory_type === "pinned"
-                    ? () => setEditTarget(routeState.selected)
+                  selectedMemoryForDetail.memory_type === "pinned"
+                    ? () => setEditTarget(selectedMemoryForDetail)
                     : undefined
                 }
                 t={t}
@@ -625,24 +621,23 @@ export const SpacePageLayout = ({
         />
       )}
 
-      {routeState.selected &&
+      {showSelectedMemoryDetail &&
         (!routeState.isDesktopViewport || routeState.selectedDetailMode === "sheet") && (
           <MobileDetailSheet
-            memory={routeState.selected}
-            derivedTags={dataModel.getActiveDerivedTags(routeState.selected)}
+            memory={selectedMemoryForDetail}
+            derivedTags={dataModel.getActiveDerivedTags(selectedMemoryForDetail)}
             sessionMessages={dataModel.selectedSessionMessages}
             sessionMessagesLoading={dataModel.selectedSessionMessagesLoading}
             open={!!routeState.selected}
             onOpenChange={(open) => !open && routeState.setSelected(null)}
             onDelete={() => {
-              if (!routeState.selected) return;
-              setDeleteTarget(routeState.selected);
+              setDeleteTarget(selectedMemoryForDetail);
               routeState.setSelected(null);
             }}
             onEdit={
-              routeState.selected?.memory_type === "pinned"
+              selectedMemoryForDetail.memory_type === "pinned"
                 ? () => {
-                    setEditTarget(routeState.selected);
+                    setEditTarget(selectedMemoryForDetail);
                     routeState.setSelected(null);
                   }
                 : undefined

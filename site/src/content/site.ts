@@ -2,6 +2,39 @@ export type SiteLocale = 'en' | 'zh' | 'zh-Hant' | 'ja' | 'ko' | 'id' | 'th';
 export type SiteThemePreference = 'light' | 'dark' | 'system';
 export type SiteResolvedTheme = 'light' | 'dark';
 
+export const agentGuideTargets = {
+  openclaw: {
+    href: 'https://mem9.ai/SKILL.md',
+    external: true,
+  },
+  hermes: {
+    href: 'https://github.com/mem9-ai/mem9-hermes-plugin#readme',
+    external: true,
+  },
+  claude: {
+    href: 'https://github.com/mem9-ai/mem9/tree/main/claude-plugin#readme',
+    external: true,
+  },
+  opencode: {
+    href: 'https://github.com/mem9-ai/mem9/tree/main/opencode-plugin#readme',
+    external: true,
+  },
+  codex: {
+    href: 'https://github.com/mem9-ai/mem9/tree/main/codex-plugin#readme',
+    external: true,
+  },
+  deepseek: {
+    href: 'https://github.com/mem9-ai/mem9/tree/main/dsh-plugin#readme',
+    external: true,
+  },
+  dify: {
+    href: 'https://github.com/mem9-ai/mem9-dify-plugin#readme',
+    external: true,
+  },
+} as const;
+
+export type SiteAgentGuideId = keyof typeof agentGuideTargets;
+
 export interface SiteMeta {
   title: string;
   description: string;
@@ -14,12 +47,22 @@ export interface SiteNavCopy {
   benchmark: string;
   openclaw: string;
   yourMemory: string;
+  yourMemoryDescription: string;
+  webConsole: string;
+  webConsoleDescription: string;
+  login: string;
   billing: string;
   security: string;
   faq: string;
   github: string;
+  xcom: string;
   docs: string;
+  mem9Docs: string;
+  consoleDocs: string;
   api: string;
+  apiReferences: string;
+  howItWork: string;
+  releaseNotes: string;
   contact: string;
 }
 
@@ -33,19 +76,29 @@ export interface SiteHeroFeature {
   description: string;
 }
 
+export interface SiteGuideLinkCopy {
+  id: SiteAgentGuideId;
+  label: string;
+}
+
+export interface SiteHeroGuideSelectorCopy {
+  label: string;
+  items: SiteGuideLinkCopy[];
+}
+
 export interface SiteHeroCopy {
   eyebrow: string;
   titleLead: string;
   titleAccent: string;
   subtitle: string;
-  poweredByLabel?: string;
+  guideSelector?: SiteHeroGuideSelectorCopy;
   onboardingLabel: string;
+  onboardingBadge: string;
   onboardingHint: string;
   onboardingStableLabel: string;
   onboardingBetaLabel: string;
   onboardingCommandStable: string;
   onboardingCommandBeta: string;
-  substrateCtaLabel?: string;
   betaFeature: SiteHeroFeature;
   highlights: SiteHeroHighlight[];
 }
@@ -69,10 +122,18 @@ export interface SiteCodeSampleCopy {
   code: string;
 }
 
+export interface SiteFaqGroupCopy {
+  label: string;
+  body?: string;
+  example?: SiteCodeSampleCopy;
+  link?: SiteLinkCopy;
+}
+
 export interface SiteFaqItemCopy {
   question: string;
   answer: string[];
   bullets?: string[];
+  groups?: SiteFaqGroupCopy[];
   links?: SiteLinkCopy[];
   examples?: SiteCodeSampleCopy[];
 }
@@ -102,6 +163,9 @@ export interface SitePlatformItem {
   desc: string;
   detail: string;
   badge?: string;
+  guideId?: SiteAgentGuideId;
+  href?: string;
+  external?: boolean;
 }
 
 export interface SitePlatformsCopy {
@@ -110,6 +174,7 @@ export interface SitePlatformsCopy {
   description: string;
   items: SitePlatformItem[];
   ctaLabel: string;
+  guideCtaLabel: string;
   note: string;
 }
 
@@ -138,10 +203,13 @@ export interface SiteSecurityPageCopy {
 export interface SiteBillingTier {
   name: string;
   price: string;
+  promoPrice?: string;
   period: string;
   features: string[];
   ctaLabel: string;
-  ctaAction: 'alert' | 'mailto';
+  ctaAction: 'signin' | 'mailto' | 'plan';
+  planSku?: 'starter' | 'pro';
+  interval?: 'month' | 'year';
   highlighted?: boolean;
 }
 
@@ -150,8 +218,9 @@ export interface SiteBillingPageCopy {
   kicker: string;
   title: string;
   description: string;
+  docsLinkLabel?: string;
+  featureLabels: string[];
   tiers: SiteBillingTier[];
-  alertMessage: string;
   contactMessage: string;
   contactCopyLabel: string;
   contactCopiedMessage: string;
@@ -173,6 +242,7 @@ export interface SiteApiEndpointCopy {
   description?: string;
   notes?: string[];
   headers?: SiteApiFieldCopy[];
+  pathParams?: SiteApiFieldCopy[];
   queryParams?: SiteApiFieldCopy[];
   bodyFields?: SiteApiFieldCopy[];
   responseFields?: SiteApiFieldCopy[];
@@ -203,6 +273,29 @@ export interface SiteApiPageCopy {
     sidebarTitle: string;
     sidebarAuth: string;
     sidebarQuickstart: string;
+    apiProduct: string;
+    webConsole: string;
+    yourMemory: string;
+    apiSearch: string;
+    apiSearchPlaceholder: string;
+    apiSearchEmpty: string;
+    testApi: string;
+    testTitle: string;
+    close: string;
+    closeApiTestModal: string;
+    reset: string;
+    run: string;
+    baseUrl: string;
+    pathParams: string;
+    jsonBody: string;
+    ready: string;
+    responseReady: string;
+    emptyResponse: string;
+    running: string;
+    runningRequest: string;
+    requestFailed: string;
+    pathParameter: string;
+    saveFormInfo: string;
   };
   authTitle: string;
   authCards: {
@@ -218,6 +311,62 @@ export interface SiteApiPageCopy {
   ctaBody: string;
   ctaLinks: SiteLinkCopy[];
 }
+
+export interface SiteReleaseNoteSource {
+  label: string;
+  href: string;
+}
+
+export interface SiteReleaseNoteSection {
+  title: string;
+  body?: string;
+  items?: string[];
+  ordered?: boolean;
+}
+
+export interface SiteReleaseNoteItem {
+  date: string;
+  version: string;
+  title: string;
+  summary: string;
+  sections?: SiteReleaseNoteSection[];
+  sources: SiteReleaseNoteSource[];
+}
+
+export interface SiteReleaseNoteGroup {
+  period: string;
+  items: SiteReleaseNoteItem[];
+}
+
+export interface SiteReleaseNotesPageCopy {
+  meta: SiteMeta;
+  kicker: string;
+  title: string;
+  intro: string;
+  heroImageAlt: string;
+  starPrompt: string;
+  starBadgeAlt: string;
+  starBadgeSrc: string;
+  starHref: string;
+  updatedLabel: string;
+  updatedValue: string;
+  sourcesLabel: string;
+  sourcesFeedback: string;
+  groups: SiteReleaseNoteGroup[];
+}
+
+type SiteReleaseNoteDraftItem = Omit<SiteReleaseNoteItem, 'sources' | 'version'> & {
+  sources?: SiteReleaseNoteSource[];
+  version?: string;
+};
+
+type SiteReleaseNoteDraftGroup = Omit<SiteReleaseNoteGroup, 'items'> & {
+  items: SiteReleaseNoteDraftItem[];
+};
+
+type SiteReleaseNotesPageDraft = Omit<SiteReleaseNotesPageCopy, 'groups'> & {
+  groups: SiteReleaseNoteDraftGroup[];
+};
 
 export interface SiteBenchmarkCategoryScore {
   name: string;
@@ -249,11 +398,13 @@ export interface SiteFooterCopy {
   contributing: string;
   security: string;
   contact: string;
+  poweredByLabel: string;
   copyright: string;
 }
 
 export interface SiteAriaCopy {
   home: string;
+  mainMenu: string;
   changeLanguage: string;
   changeTheme: string;
   themeModeLight: string;
@@ -273,6 +424,12 @@ export interface SiteCopyFeedback {
   copyFailed: string;
 }
 
+export interface SitePageToolsCopy {
+  copyMarkdown: string;
+  copiedMarkdown: string;
+  copyMarkdownFailed: string;
+}
+
 export interface SiteDictionary {
   meta: SiteMeta;
   nav: SiteNavCopy;
@@ -283,12 +440,14 @@ export interface SiteDictionary {
   benchmark: SiteBenchmarkCopy;
   faq: SiteFaqCopy;
   apiPage: SiteApiPageCopy;
+  releaseNotesPage: SiteReleaseNotesPageCopy;
   securityPage: SiteSecurityPageCopy;
   billing: SiteBillingPageCopy;
   footer: SiteFooterCopy;
   aria: SiteAriaCopy;
   themeOptions: SiteThemeOptionsCopy;
   copyFeedback: SiteCopyFeedback;
+  pageTools: SitePageToolsCopy;
   localeNames: Record<SiteLocale, string>;
 }
 
@@ -308,20 +467,41 @@ const localeNames: Record<SiteLocale, string> = {
   th: 'ไทย',
 };
 
+const guideSelectorItems: SiteGuideLinkCopy[] = [
+  { id: 'openclaw', label: 'OpenClaw' },
+  { id: 'hermes', label: 'Hermes Agent' },
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'deepseek', label: 'DeepSeek Harness' },
+  { id: 'dify', label: 'Dify' },
+];
+
 const stableOnboardingCommand =
   'Read https://mem9.ai/SKILL.md and follow the instructions to install and configure mem9 for OpenClaw';
 const provisionKeyCode = 'curl -sX POST https://api.mem9.ai/v1alpha1/mem9s';
 const exportApiEnvCode = `export API_KEY="your-api-key"
 export API="https://api.mem9.ai/v1alpha2/mem9s"`;
+const exportChainApiEnvCode = `export CHAIN_API_KEY="your-chain-api-key"
+export API="https://api.mem9.ai/v1alpha2/mem9s"
+export CHAIN_API="https://api.mem9.ai/v1alpha2/space-chains"`;
 const healthCheckCode = 'curl -s https://api.mem9.ai/healthz';
+const versionCheckCode = 'curl -s https://api.mem9.ai/versionz';
 const createMemoryCode = `curl -sX POST "$API/memories" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: $API_KEY" \\
   -H "X-Mnemo-Agent-Id: openclaw-main" \\
-  -d '{"content":"Project uses PostgreSQL 15","tags":["tech","database"],"metadata":{"source":"setup-note"}}'`;
-const listMemoryCode = 'curl -s -H "X-API-Key: $API_KEY" "$API/memories?q=postgres&limit=5"';
+  -d '{"appId":"docs","content":"Project uses PostgreSQL 15","tags":["tech","database"],"metadata":{"source":"setup-note"}}'`;
+const smartIngestCode = `curl -sX POST "$API/memories" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $API_KEY" \\
+  -H "X-Mnemo-Agent-Id: openclaw-main" \\
+  -d '{"appId":"docs","session_id":"ses-001","mode":"smart","sync":true,"messages":[{"role":"user","content":"We use PostgreSQL 15"},{"role":"assistant","content":"Noted."}]}'`;
+const listMemoryCode = 'curl -s -H "X-API-Key: $API_KEY" "$API/memories?q=postgres&appId=docs&limit=5"';
 const filterMemoryCode =
-  'curl -s -H "X-API-Key: $API_KEY" "$API/memories?tags=tech&source=openclaw-main&limit=10"';
+  'curl -s -H "X-API-Key: $API_KEY" "$API/memories?tags=tech&source=openclaw-main&appId=null&limit=10"';
+const keywordListMemoryCode =
+  'curl -s -H "X-API-Key: $API_KEY" "$API/memories?q=postgres&search_mode=keyword&appId=docs&limit=10&sort_by=updated_at&sort_dir=desc"';
 const getMemoryCode = 'curl -s -H "X-API-Key: $API_KEY" "$API/memories/{id}"';
 const updateMemoryCode = `curl -sX PUT "$API/memories/{id}" \\
   -H "Content-Type: application/json" \\
@@ -329,84 +509,153 @@ const updateMemoryCode = `curl -sX PUT "$API/memories/{id}" \\
   -H "If-Match: 3" \\
   -d '{"content":"Project uses PostgreSQL 16","tags":["tech","database"]}'`;
 const deleteMemoryCode = 'curl -sX DELETE -H "X-API-Key: $API_KEY" "$API/memories/{id}"';
+const batchDeleteMemoryCode = `curl -sX POST "$API/memories/batch-delete" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $API_KEY" \\
+  -d '{"ids":["memory-id-1","memory-id-2"]}'`;
 const importMemoryFileCode = `curl -sX POST "$API/imports" \\
   -H "X-API-Key: $API_KEY" \\
   -F "file=@memory.json" \\
   -F "file_type=memory" \\
-  -F "agent_id=openclaw-main"`;
+  -F "agent_id=openclaw-main"
+
+# memory.json may include:
+# {"appId":"docs","memories":[{"content":"Project uses PostgreSQL 15","appId":"docs"}]}`;
 const importSessionFileCode = `curl -sX POST "$API/imports" \\
   -H "X-API-Key: $API_KEY" \\
   -F "file=@session.json" \\
   -F "file_type=session" \\
   -F "session_id=ses-001" \\
-  -F "agent_id=openclaw-main"`;
+  -F "agent_id=openclaw-main"
+
+# session.json may include:
+# {"appId":"docs","session_id":"ses-001","messages":[{"role":"user","content":"..."}]}`;
 const listImportsCode = 'curl -s -H "X-API-Key: $API_KEY" "$API/imports"';
 const getImportCode = 'curl -s -H "X-API-Key: $API_KEY" "$API/imports/{id}"';
 const sessionMessagesCode =
-  'curl -s -H "X-API-Key: $API_KEY" "$API/session-messages?session_id=ses-001&session_id=ses-002&limit_per_session=20"';
+  'curl -s -H "X-API-Key: $API_KEY" "$API/session-messages?session_id=ses-001&session_id=ses-002&appId=docs&limit_per_session=20"';
+const keyStatusCode = 'curl -s -H "X-API-Key: $API_KEY" https://api.mem9.ai/v1alpha2/status';
+const chainKeyStatusCode = 'curl -s -H "X-API-Key: $CHAIN_API_KEY" https://api.mem9.ai/v1alpha2/status';
+const createSpaceChainCode = `curl -sX POST https://api.mem9.ai/v1alpha2/space-chains \\
+  -H "Content-Type: application/json" \\
+  -d '{"name":"Team Knowledge Chain","description":"Ordered recall across team spaces"}'`;
+const getSpaceChainByKeyCode = 'curl -s -H "X-API-Key: $CHAIN_API_KEY" "$CHAIN_API/by-key"';
+const getSpaceChainCode = 'curl -s -H "X-API-Key: $CHAIN_API_KEY" "$CHAIN_API/{chain_id}"';
+const updateSpaceChainCode = `curl -sX PATCH "$CHAIN_API/{chain_id}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $CHAIN_API_KEY" \\
+  -d '{"name":"Team Knowledge Chain","description":"Updated description"}'`;
+const deleteSpaceChainCode = `curl -sX DELETE "$CHAIN_API/{chain_id}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $CHAIN_API_KEY" \\
+  -d '{"deleted_by_user_id":"user-123"}'`;
+const listSpaceChainNodesCode = 'curl -s -H "X-API-Key: $CHAIN_API_KEY" "$CHAIN_API/{chain_id}/nodes"';
+const replaceSpaceChainNodesCode = `curl -sX PUT "$CHAIN_API/{chain_id}/nodes" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $CHAIN_API_KEY" \\
+  -d '{"nodes":[{"tenant_id":"space_key_a","external_space_id":"space-team","display_name":"Team"},{"tenant_id":"space_key_b","external_space_id":"space-company","display_name":"Company"}]}'`;
+const updateSpaceChainRoutingPolicyCode = `curl -sX PUT "$CHAIN_API/{chain_id}/nodes/{node_id}/routing-policy" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $CHAIN_API_KEY" \\
+  -d '{"enabled":true,"prompt":"Facts about billing, plans, or usage limits","webhook_only":false}'`;
+const listSpaceChainBindingsCode = 'curl -s -H "X-API-Key: $CHAIN_API_KEY" "$CHAIN_API/{chain_id}/bindings"';
+const createSpaceChainBindingCode = `curl -sX POST "$CHAIN_API/{chain_id}/bindings" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $CHAIN_API_KEY" \\
+  -d '{}'`;
+const disableSpaceChainBindingCode = `curl -sX PATCH "$CHAIN_API/{chain_id}/bindings/{binding_id}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $CHAIN_API_KEY" \\
+  -d '{"disabled":true,"disabled_by_user_id":"user-123"}'`;
+const recallSpaceChainCode = 'curl -s -H "X-API-Key: $CHAIN_API_KEY" "$API/memories?q=postgres&scanAll=true&limit=10"';
+const createSpaceWebhookCode = `curl -sX POST "$API/webhooks" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $API_KEY" \\
+  -d '{"name":"Production sync","url":"https://example.com/mem9/webhook","enabled":true,"events":["memory.added","memory.deleted"]}'`;
+const listSpaceWebhooksCode = 'curl -s -H "X-API-Key: $API_KEY" "$API/webhooks"';
+const updateSpaceWebhookCode = `curl -sX PATCH "$API/webhooks/{webhookID}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $API_KEY" \\
+  -d '{"enabled":false}'`;
+const testSpaceWebhookCode = `curl -sX POST "$API/webhooks/{webhookID}/test" \\
+  -H "X-API-Key: $API_KEY"`;
+const rotateSpaceWebhookSecretCode = `curl -sX POST "$API/webhooks/{webhookID}/rotate-secret" \\
+  -H "X-API-Key: $API_KEY"`;
+const listSpaceWebhookDeliveriesCode = 'curl -s -H "X-API-Key: $API_KEY" "$API/webhook-deliveries?limit=25"';
+const createSpaceChainWebhookCode = `curl -sX POST "$CHAIN_API/{chain_id}/webhooks" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $CHAIN_API_KEY" \\
+  -d '{"name":"Routing audit","url":"https://example.com/mem9/chain-webhook","enabled":true,"events":["space_chain.fact_routed"]}'`;
+const listSpaceChainWebhooksCode = 'curl -s -H "X-API-Key: $CHAIN_API_KEY" "$CHAIN_API/{chain_id}/webhooks"';
+const updateSpaceChainWebhookCode = `curl -sX PATCH "$CHAIN_API/{chain_id}/webhooks/{webhookID}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $CHAIN_API_KEY" \\
+  -d '{"events":["memory.added","space_chain.fact_routed"]}'`;
+const testSpaceChainWebhookCode = `curl -sX POST "$CHAIN_API/{chain_id}/webhooks/{webhookID}/test" \\
+  -H "X-API-Key: $CHAIN_API_KEY"`;
+const rotateSpaceChainWebhookSecretCode = `curl -sX POST "$CHAIN_API/{chain_id}/webhooks/{webhookID}/rotate-secret" \\
+  -H "X-API-Key: $CHAIN_API_KEY"`;
+const listSpaceChainWebhookDeliveriesCode =
+  'curl -s -H "X-API-Key: $CHAIN_API_KEY" "$CHAIN_API/{chain_id}/webhook-deliveries?limit=25"';
 
 const faqCopyByLocale: Record<SiteLocale, SiteFaqCopy> = {
   en: {
     kicker: 'FAQ',
-    title: 'How API keys and mem9 API work',
-    description:
-      'These are the questions we receive most often from onboarding emails and first-time API users.',
+    title: 'Common questions',
+    description: 'Quick answers about API keys, security, and using mem9.',
     items: [
       {
         question: 'How do I get a mem9 API key?',
         answer: [
-          'There are two supported paths. The fastest path is to paste the onboarding command below into OpenClaw and let mem9 guide setup or reconnect for you.',
-          'If you want to provision a key directly, call the hosted provisioning endpoint. The response body returns an `id`, and that value is your mem9 API key.',
+          'Pick the path that matches how you use mem9. Each one provisions a key tied to the same memory space.',
+        ],
+        groups: [
+          {
+            label: 'For OpenClaw users',
+            body: 'Paste this command into your OpenClaw chat. It will install mem9 and provision a key automatically.',
+            example: { label: 'Paste in OpenClaw', code: stableOnboardingCommand },
+          },
+          {
+            label: 'For other agents',
+            body: 'Open the setup guide for your agent. They ship a one-step install or plugin readme that handles the key for you.',
+            link: { label: 'See all supported agents', href: '#platforms' },
+          },
+          {
+            label: 'For custom integrations',
+            body: 'Provision a key yourself via the HTTP API, then pass it as the `X-API-Key` header.',
+            example: { label: 'Provision via API', code: provisionKeyCode },
+            link: { label: 'Open API reference', href: '/api' },
+          },
+        ],
+      },
+      {
+        question: 'How should I keep my API key safe?',
+        answer: [
+          'Treat your API key like a password. Anyone with the key can read and write your memories.',
         ],
         bullets: [
-          'Use the same key later in Your Memory or on another trusted machine.',
-          'Keep it private. Anyone who has the key can access that mem9 space.',
-        ],
-        links: [
-          { label: 'Open SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-          { label: 'Open API reference', href: '/api' },
-        ],
-        examples: [
-          { label: 'Onboarding command', code: stableOnboardingCommand },
-          { label: 'Direct provisioning', code: provisionKeyCode },
+          'Store it in a password manager or a controlled secret store.',
+          'Never commit it to a repository, paste it into screenshots, or share it in public channels.',
+          'If a key is leaked, rotate it by provisioning a new one.',
         ],
       },
       {
-        question: 'Can I reuse the same API key on another machine or in Your Memory?',
+        question: 'Can I reuse the same API key across machines and agents?',
         answer: [
-          'Yes. The same API key reconnects the same mem9 space on another trusted machine, and it is also the credential you use inside Your Memory.',
-          'If the dashboard asks for a Space ID, enter the same mem9 API key there.',
-        ],
-        links: [{ label: 'Open Your Memory', href: 'https://mem9.ai/your-memory', external: true }],
-      },
-      {
-        question: 'How should I store the API key?',
-        answer: [
-          'Treat the API key like a secret. Store it in a password manager, secure vault, or another controlled secret store.',
-          'Do not commit it to a repository, paste it into screenshots, or share it in public channels.',
+          'Yes. The same key connects to the same memory space from any machine, agent, or the Your Memory dashboard.',
         ],
       },
       {
         question: 'What can I do with the mem9 API?',
         answer: [
-          'The hosted API lets you provision a key, create and search memories, update or delete individual memories, upload memory or session files, and inspect captured session messages.',
-          'Most users only need `v1alpha2` day to day, with `X-API-Key` as the primary auth header.',
+          'Read, write, search, and manage memories and sessions. Most integrations use the `v1alpha2` endpoints with the `X-API-Key` header.',
         ],
         links: [{ label: 'Browse all endpoints', href: '/api' }],
       },
       {
-        question: 'What is the difference between v1alpha1 and v1alpha2?',
+        question: 'Is my data secure?',
         answer: [
-          '`v1alpha1` is mainly for provisioning a new key and for legacy tenant-scoped compatibility routes.',
-          '`v1alpha2` is the normal hosted path for reads, writes, imports, and session lookups. Send your key in `X-API-Key`, and optionally send `X-Mnemo-Agent-Id` when you want agent attribution.',
-        ],
-        links: [{ label: 'See version and auth details', href: '/api' }],
-      },
-      {
-        question: 'Is mem9 secure?',
-        answer: [
-          'mem9 is built on enterprise-grade cloud infrastructure with encryption in transit and at rest, access controls, auditability, and clear operational boundaries.',
-          'If you need deeper trust details, start with the security overview on the homepage and reach out for additional materials.',
+          'mem9 runs on enterprise-grade cloud infrastructure with encryption in transit and at rest, plus access controls and audit logging.',
         ],
         links: [{ label: 'Jump to security overview', href: '/#security' }],
       },
@@ -414,64 +663,61 @@ const faqCopyByLocale: Record<SiteLocale, SiteFaqCopy> = {
   },
   zh: {
     kicker: 'FAQ',
-    title: 'API Key 与 mem9 API 常见问题',
-    description: '这些是我们在邮件咨询、安装引导和首次接入 API 时最常收到的问题。',
+    title: '常见问题',
+    description: '关于 API Key、安全和使用 mem9 的快速解答。',
     items: [
       {
         question: '如何获取 mem9 API key？',
         answer: [
-          '有两种官方方式。最快的是把下面这条 onboarding command 直接粘贴给 OpenClaw，让它按 SKILL.md 帮你完成 setup 或 reconnect。',
-          '如果你想通过程序直接创建，调用 hosted provision 接口即可。响应里的 `id` 就是你的 mem9 API key。',
+          '按你使用 mem9 的方式选择一种获取方式，每条路径都会绑定到同一个记忆空间。',
+        ],
+        groups: [
+          {
+            label: 'OpenClaw 用户',
+            body: '把下面这条命令粘贴到 OpenClaw 对话中，它会自动为你安装 mem9 并申请 API Key。',
+            example: { label: '粘贴到 OpenClaw', code: stableOnboardingCommand },
+          },
+          {
+            label: '使用其他 Agent',
+            body: '打开你所用 Agent 的接入指南，它们都会有一键安装或插件 readme，自动帮你完成 Key 的申请。',
+            link: { label: '查看所有支持的 Agent', href: '#platforms' },
+          },
+          {
+            label: '自己集成',
+            body: '通过 HTTP API 自己申请一个 Key，然后用 `X-API-Key` 请求头携带它。',
+            example: { label: '通过 API 申请', code: provisionKeyCode },
+            link: { label: '打开 API 文档', href: '/api' },
+          },
+        ],
+      },
+      {
+        question: '如何保护我的 API key？',
+        answer: [
+          '请把 API Key 当作密码对待，任何拿到它的人都能读写你的记忆。',
         ],
         bullets: [
-          '之后在 Your Memory 或另一台可信机器上继续使用同一个 key。',
-          '请把它当作密钥保存，拿到它的人都能访问对应的 mem9 space。',
-        ],
-        links: [
-          { label: '打开 SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-          { label: '打开 API 文档', href: '/api' },
-        ],
-        examples: [
-          { label: 'Onboarding command', code: stableOnboardingCommand },
-          { label: '直接 provision', code: provisionKeyCode },
+          '存放在密码管理器或受控的 secret store 中。',
+          '不要提交到代码仓库、出现在截图里，也不要发到公开聊天频道。',
+          '一旦泄漏，请立即申请一个新的 Key 替换。',
         ],
       },
       {
-        question: '同一个 API key 能在另一台机器或 Your Memory 中复用吗？',
+        question: '同一个 API key 可以在不同机器和 Agent 中复用吗？',
         answer: [
-          '可以。同一个 API key 会重新连接到同一个 mem9 space，在另一台可信机器上也一样。',
-          '它也是你登录 Your Memory 时使用的凭证；如果 dashboard 提示填写 Space ID，就填这个 API key。',
-        ],
-        links: [{ label: '打开 Your Memory', href: 'https://mem9.ai/your-memory', external: true }],
-      },
-      {
-        question: 'API key 应该怎么保存？',
-        answer: [
-          '请把 API key 当作 secret 保存，推荐放进密码管理器、团队密钥库或其他受控的 secret store。',
-          '不要提交到代码仓库，不要出现在截图里，也不要发到公开聊天频道。',
+          '可以。同一个 Key 在任意机器、Agent 或 Your Memory 面板中都连接到同一个记忆空间。',
         ],
       },
       {
         question: 'mem9 API 能做什么？',
         answer: [
-          'hosted API 可以创建 key、写入和搜索记忆、更新或删除单条记忆、上传 memory / session 文件，以及读取捕获到的 session messages。',
-          '大多数日常调用只需要 `v1alpha2`，并通过 `X-API-Key` 认证。',
+          '读写、搜索和管理你的记忆与会话。大多数集成使用带有 `X-API-Key` 请求头的 `v1alpha2` 接口。',
         ],
         links: [{ label: '查看全部接口', href: '/api' }],
       },
       {
-        question: '`v1alpha1` 和 `v1alpha2` 有什么区别？',
-        answer: [
-          '`v1alpha1` 主要用于创建新 key，以及兼容旧的 tenant-scoped 路由。',
-          '`v1alpha2` 是正常的 hosted 读写、导入和 session 查询路径。把 key 放在 `X-API-Key` 里；如果需要标记 agent 身份，可以额外带上 `X-Mnemo-Agent-Id`。',
-        ],
-        links: [{ label: '查看版本与认证说明', href: '/api' }],
-      },
-      {
         question: 'mem9 安全吗？',
         answer: [
-          'mem9 运行在企业级云基础设施上，具备传输与静态加密、访问控制、可审计性以及清晰的数据处理边界。',
-          '如果你需要更详细的信任材料，可以先看首页的安全概览，再联系团队获取补充信息。',
+          'mem9 运行在企业级云基础设施上，提供传输与静态加密、访问控制以及审计日志。',
         ],
         links: [{ label: '跳转到安全概览', href: '/#security' }],
       },
@@ -479,64 +725,61 @@ const faqCopyByLocale: Record<SiteLocale, SiteFaqCopy> = {
   },
   'zh-Hant': {
     kicker: 'FAQ',
-    title: 'API Key 與 mem9 API 常見問題',
-    description: '這些是我們在郵件諮詢、安裝引導與第一次串接 API 時最常收到的問題。',
+    title: '常見問題',
+    description: '關於 API Key、安全和使用 mem9 的快速解答。',
     items: [
       {
         question: '如何取得 mem9 API key？',
         answer: [
-          '有兩種官方方式。最快的是把下面這條 onboarding command 直接貼給 OpenClaw，讓它依照 SKILL.md 幫你完成 setup 或 reconnect。',
-          '如果你想用程式直接建立，呼叫 hosted provision 介面即可。回應裡的 `id` 就是你的 mem9 API key。',
+          '依你使用 mem9 的方式挑一條路徑，每條都會綁定到同一個記憶空間。',
+        ],
+        groups: [
+          {
+            label: 'OpenClaw 用戶',
+            body: '把下面這條命令貼到 OpenClaw 對話中，它會自動為你安裝 mem9 並申請 API Key。',
+            example: { label: '貼到 OpenClaw', code: stableOnboardingCommand },
+          },
+          {
+            label: '使用其他 Agent',
+            body: '開啟你所用 Agent 的接入指南，它們都會有一鍵安裝或外掛 readme，自動幫你完成 Key 的申請。',
+            link: { label: '查看所有支援的 Agent', href: '#platforms' },
+          },
+          {
+            label: '自己整合',
+            body: '透過 HTTP API 自己申請一個 Key，再用 `X-API-Key` 請求頭帶上它。',
+            example: { label: '透過 API 申請', code: provisionKeyCode },
+            link: { label: '打開 API 文件', href: '/api' },
+          },
+        ],
+      },
+      {
+        question: '如何保護我的 API key？',
+        answer: [
+          '請把 API Key 當作密碼對待，任何拿到它的人都能讀寫你的記憶。',
         ],
         bullets: [
-          '之後在 Your Memory 或另一台可信任機器上都使用同一個 key。',
-          '請把它當成密鑰保存，拿到它的人都能存取對應的 mem9 space。',
-        ],
-        links: [
-          { label: '打開 SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-          { label: '打開 API 文件', href: '/api' },
-        ],
-        examples: [
-          { label: 'Onboarding command', code: stableOnboardingCommand },
-          { label: '直接 provision', code: provisionKeyCode },
+          '存放在密碼管理器或受控的 secret store 中。',
+          '不要提交到程式碼倉庫、出現在截圖裡，也不要貼到公開聊天頻道。',
+          '一旦外洩，請立即申請一個新的 Key 替換。',
         ],
       },
       {
-        question: '同一個 API key 能在另一台機器或 Your Memory 裡重用嗎？',
+        question: '同一個 API key 可以在不同機器和 Agent 中重複使用嗎？',
         answer: [
-          '可以。同一個 API key 會重新連到同一個 mem9 space，在另一台可信任機器上也是如此。',
-          '它也是你登入 Your Memory 時使用的憑證；如果 dashboard 要求輸入 Space ID，就填這個 API key。',
-        ],
-        links: [{ label: '打開 Your Memory', href: 'https://mem9.ai/your-memory', external: true }],
-      },
-      {
-        question: 'API key 應該怎麼保存？',
-        answer: [
-          '請把 API key 當作 secret 保存，建議放進密碼管理器、團隊金鑰庫或其他受控的 secret store。',
-          '不要提交到程式碼倉庫，不要出現在截圖裡，也不要貼到公開聊天頻道。',
+          '可以。同一個 Key 在任意機器、Agent 或 Your Memory 面板中都連接到同一個記憶空間。',
         ],
       },
       {
-        question: 'mem9 API 可以做什麼？',
+        question: 'mem9 API 能做什麼？',
         answer: [
-          'hosted API 可以建立 key、寫入與搜尋記憶、更新或刪除單筆記憶、上傳 memory / session 檔案，以及讀取捕捉到的 session messages。',
-          '大多數日常呼叫只需要 `v1alpha2`，並透過 `X-API-Key` 驗證。',
+          '讀寫、搜尋和管理你的記憶與會話。大多數整合使用帶有 `X-API-Key` 請求頭的 `v1alpha2` 介面。',
         ],
         links: [{ label: '查看全部端點', href: '/api' }],
       },
       {
-        question: '`v1alpha1` 和 `v1alpha2` 有什麼差別？',
-        answer: [
-          '`v1alpha1` 主要用來建立新 key，以及相容舊的 tenant-scoped 路由。',
-          '`v1alpha2` 是正常的 hosted 讀寫、匯入與 session 查詢路徑。把 key 放在 `X-API-Key`；若要標示 agent 身分，可另外帶上 `X-Mnemo-Agent-Id`。',
-        ],
-        links: [{ label: '查看版本與驗證說明', href: '/api' }],
-      },
-      {
         question: 'mem9 安全嗎？',
         answer: [
-          'mem9 建置於企業級雲端基礎設施上，具備傳輸與靜態加密、存取控制、可稽核性，以及清楚的資料處理邊界。',
-          '如果你需要更完整的信任材料，可以先看首頁的安全概覽，再聯絡團隊取得更多資訊。',
+          'mem9 運行在企業級雲端基礎設施上，提供傳輸與靜態加密、存取控制以及稽核日誌。',
         ],
         links: [{ label: '跳到安全概覽', href: '/#security' }],
       },
@@ -544,64 +787,61 @@ const faqCopyByLocale: Record<SiteLocale, SiteFaqCopy> = {
   },
   ja: {
     kicker: 'FAQ',
-    title: 'API key と mem9 API のよくある質問',
-    description: 'メールでの問い合わせ、セットアップ、初回 API 利用で特によく出る質問をまとめました。',
+    title: 'よくある質問',
+    description: 'API Key、セキュリティ、mem9 の使い方についての簡単な回答です。',
     items: [
       {
         question: 'mem9 API key はどう取得しますか？',
         answer: [
-          '公式の方法は 2 つあります。最速なのは、下の onboarding command をそのまま OpenClaw に貼り付け、SKILL.md の流れで setup / reconnect を進める方法です。',
-          'プログラムから直接作成したい場合は hosted の provision エンドポイントを呼びます。返ってくる `id` がそのまま mem9 API key です。',
+          'mem9 の使い方に合わせてパスを選んでください。どのパスでも同じメモリ空間に紐づく Key が発行されます。',
+        ],
+        groups: [
+          {
+            label: 'OpenClaw ユーザー',
+            body: 'このコマンドを OpenClaw のチャットに貼り付けてください。OpenClaw が mem9 をインストールし、API Key を自動発行します。',
+            example: { label: 'OpenClaw に貼り付け', code: stableOnboardingCommand },
+          },
+          {
+            label: 'その他のエージェント',
+            body: '使用しているエージェントのセットアップガイドを開いてください。各ガイドにワンステップのインストールやプラグイン readme があり、Key の発行も自動で行われます。',
+            link: { label: '対応エージェント一覧へ', href: '#platforms' },
+          },
+          {
+            label: '独自連携を作る場合',
+            body: 'HTTP API 経由で自分で Key を発行し、`X-API-Key` ヘッダーに乗せてください。',
+            example: { label: 'API で発行', code: provisionKeyCode },
+            link: { label: 'API リファレンスを開く', href: '/api' },
+          },
+        ],
+      },
+      {
+        question: 'API key はどう安全に保管すべきですか？',
+        answer: [
+          'API Key はパスワードと同様に扱ってください。Key を持つ人はあなたのメモリを読み書きできます。',
         ],
         bullets: [
-          '同じ key をあとで Your Memory や別の信頼できるマシンでも使えます。',
-          'この key を持つ人はその mem9 space にアクセスできるので、秘密情報として扱ってください。',
-        ],
-        links: [
-          { label: 'SKILL.md を開く', href: 'https://mem9.ai/SKILL.md', external: true },
-          { label: 'API リファレンスを開く', href: '/api' },
-        ],
-        examples: [
-          { label: 'Onboarding command', code: stableOnboardingCommand },
-          { label: '直接 provision', code: provisionKeyCode },
+          'パスワードマネージャーや管理された secret store に保存します。',
+          'リポジトリへのコミット、スクリーンショットへの露出、公開チャネルでの共有は避けます。',
+          '漏洩した場合は、新しい Key を発行してローテーションしてください。',
         ],
       },
       {
-        question: '同じ API key を別のマシンや Your Memory でも使えますか？',
+        question: 'マシンやエージェントをまたいで同じ API key を使えますか？',
         answer: [
-          'はい。同じ API key を使えば、別の信頼できるマシンでも同じ mem9 space に再接続できます。',
-          'Your Memory でも同じ値を使います。ダッシュボードで Space ID を求められた場合も、その API key を入力してください。',
-        ],
-        links: [{ label: 'Your Memory を開く', href: 'https://mem9.ai/your-memory', external: true }],
-      },
-      {
-        question: 'API key はどう保管すべきですか？',
-        answer: [
-          'API key は secret として扱い、パスワードマネージャーや安全な vault など、管理された保管先に保存してください。',
-          'リポジトリに commit したり、スクリーンショットに映したり、公開チャネルに貼ったりしないでください。',
+          'はい。同じ Key であれば、どのマシンやエージェントからでも、Your Memory ダッシュボードからでも、同じメモリ空間に接続できます。',
         ],
       },
       {
         question: 'mem9 API では何ができますか？',
         answer: [
-          'hosted API では、key の発行、memory の作成・検索・更新・削除、memory / session ファイルのアップロード、保存済み session messages の参照ができます。',
-          '日常利用のほとんどは `v1alpha2` と `X-API-Key` で十分です。',
+          'メモリやセッションの読み書き、検索、管理ができます。ほとんどの連携では `X-API-Key` ヘッダー付きの `v1alpha2` エンドポイントを使用します。',
         ],
         links: [{ label: '全エンドポイントを見る', href: '/api' }],
       },
       {
-        question: '`v1alpha1` と `v1alpha2` の違いは何ですか？',
+        question: 'データは安全ですか？',
         answer: [
-          '`v1alpha1` は主に新しい key の発行と、tenant-scoped な互換ルート向けです。',
-          '`v1alpha2` は通常の hosted read/write、import、session lookup 用です。key は `X-API-Key` に入れ、必要なら `X-Mnemo-Agent-Id` で agent を識別します。',
-        ],
-        links: [{ label: 'バージョンと認証を見る', href: '/api' }],
-      },
-      {
-        question: 'mem9 は安全ですか？',
-        answer: [
-          'mem9 はエンタープライズ級のクラウド基盤上で運用され、転送時・保存時の暗号化、アクセス制御、監査性、明確な運用境界を備えています。',
-          'より詳しい trust 情報が必要な場合は、まずホームページの security overview を確認し、そのうえで追加資料を依頼してください。',
+          'mem9 はエンタープライズ級のクラウド基盤上で運用され、転送時・保存時の暗号化、アクセス制御、監査ログを備えています。',
         ],
         links: [{ label: 'Security overview へ移動', href: '/#security' }],
       },
@@ -609,64 +849,61 @@ const faqCopyByLocale: Record<SiteLocale, SiteFaqCopy> = {
   },
   ko: {
     kicker: 'FAQ',
-    title: 'API key 와 mem9 API 자주 묻는 질문',
-    description: '이메일 문의, 설치 온보딩, 첫 API 연결에서 가장 자주 나오는 질문을 모았습니다.',
+    title: '자주 묻는 질문',
+    description: 'API Key, 보안, mem9 사용법에 대한 빠른 답변입니다.',
     items: [
       {
         question: 'mem9 API key 는 어떻게 얻나요?',
         answer: [
-          '공식 경로는 두 가지입니다. 가장 빠른 방법은 아래 onboarding command 를 그대로 OpenClaw 에 붙여 넣고, SKILL.md 흐름에 따라 setup 또는 reconnect 를 진행하는 것입니다.',
-          '프로그램에서 직접 만들고 싶다면 hosted provision 엔드포인트를 호출하면 됩니다. 응답의 `id` 값이 그대로 mem9 API key 입니다.',
+          'mem9 사용 방식에 맞는 경로를 선택하세요. 모든 경로는 같은 메모리 공간에 연결되는 Key를 발급합니다.',
+        ],
+        groups: [
+          {
+            label: 'OpenClaw 사용자',
+            body: '이 명령어를 OpenClaw 채팅에 붙여넣으세요. OpenClaw가 mem9를 설치하고 API Key를 자동 발급합니다.',
+            example: { label: 'OpenClaw에 붙여넣기', code: stableOnboardingCommand },
+          },
+          {
+            label: '다른 에이전트',
+            body: '사용 중인 에이전트의 설정 가이드를 여세요. 가이드에는 한 번에 설치되는 명령이나 플러그인 readme가 있어 Key 발급도 자동으로 처리됩니다.',
+            link: { label: '지원 에이전트 보기', href: '#platforms' },
+          },
+          {
+            label: '자체 통합',
+            body: 'HTTP API로 Key를 직접 발급한 뒤 `X-API-Key` 헤더에 실어 보내세요.',
+            example: { label: 'API로 발급', code: provisionKeyCode },
+            link: { label: 'API 레퍼런스 열기', href: '/api' },
+          },
+        ],
+      },
+      {
+        question: 'API key 를 어떻게 안전하게 보관하나요?',
+        answer: [
+          'API Key는 비밀번호처럼 다루세요. Key를 가진 사람은 누구나 당신의 메모리를 읽고 쓸 수 있습니다.',
         ],
         bullets: [
-          '같은 key 를 나중에 Your Memory 나 다른 신뢰 가능한 머신에서도 그대로 사용합니다.',
-          '이 key 를 가진 사람은 해당 mem9 space 에 접근할 수 있으므로 비밀 정보처럼 다루세요.',
-        ],
-        links: [
-          { label: 'SKILL.md 열기', href: 'https://mem9.ai/SKILL.md', external: true },
-          { label: 'API 레퍼런스 열기', href: '/api' },
-        ],
-        examples: [
-          { label: 'Onboarding command', code: stableOnboardingCommand },
-          { label: '직접 provision', code: provisionKeyCode },
+          '비밀번호 관리자나 통제된 secret store에 보관합니다.',
+          '저장소에 커밋하거나, 스크린샷에 노출하거나, 공개 채널에 공유하지 마세요.',
+          '유출되었다면 즉시 새 Key를 발급해 교체하세요.',
         ],
       },
       {
-        question: '같은 API key 를 다른 머신이나 Your Memory 에서도 쓸 수 있나요?',
+        question: '여러 머신과 에이전트에서 같은 API key 를 재사용할 수 있나요?',
         answer: [
-          '네. 같은 API key 는 다른 신뢰 가능한 머신에서도 동일한 mem9 space 로 다시 연결됩니다.',
-          'Your Memory 에서도 같은 값을 사용합니다. 대시보드가 Space ID 를 물으면 그 API key 를 입력하면 됩니다.',
-        ],
-        links: [{ label: 'Your Memory 열기', href: 'https://mem9.ai/your-memory', external: true }],
-      },
-      {
-        question: 'API key 는 어떻게 보관해야 하나요?',
-        answer: [
-          'API key 는 secret 으로 취급하고, 비밀번호 관리자나 안전한 vault 같은 통제된 저장소에 보관하세요.',
-          '저장소에 commit 하거나, 스크린샷에 노출하거나, 공개 채널에 공유하지 마세요.',
+          '네. 같은 Key는 어느 머신, 에이전트, Your Memory 대시보드에서든 같은 메모리 공간에 연결됩니다.',
         ],
       },
       {
         question: 'mem9 API 로 무엇을 할 수 있나요?',
         answer: [
-          'hosted API 로 key 발급, memory 생성/검색/수정/삭제, memory / session 파일 업로드, 저장된 session messages 조회를 할 수 있습니다.',
-          '일상적인 사용은 대부분 `v1alpha2` 와 `X-API-Key` 만으로 충분합니다.',
+          '메모리와 세션을 읽고, 쓰고, 검색하고 관리할 수 있습니다. 대부분의 통합은 `X-API-Key` 헤더와 함께 `v1alpha2` 엔드포인트를 사용합니다.',
         ],
         links: [{ label: '전체 엔드포인트 보기', href: '/api' }],
       },
       {
-        question: '`v1alpha1` 과 `v1alpha2` 의 차이는 무엇인가요?',
+        question: '데이터는 안전한가요?',
         answer: [
-          '`v1alpha1` 은 주로 새 key 발급과 tenant-scoped 호환 라우트용입니다.',
-          '`v1alpha2` 는 일반적인 hosted 읽기/쓰기, import, session 조회 경로입니다. key 는 `X-API-Key` 에 넣고, 필요하면 `X-Mnemo-Agent-Id` 로 agent 를 표시합니다.',
-        ],
-        links: [{ label: '버전과 인증 보기', href: '/api' }],
-      },
-      {
-        question: 'mem9 는 안전한가요?',
-        answer: [
-          'mem9 는 엔터프라이즈급 클라우드 인프라 위에서 운영되며, 전송 중/저장 시 암호화, 접근 제어, 감사 가능성, 명확한 운영 경계를 갖추고 있습니다.',
-          '더 자세한 신뢰 자료가 필요하면 먼저 홈페이지의 security overview 를 보고, 추가 자료를 요청하세요.',
+          'mem9는 전송 중과 저장 시 암호화, 접근 제어, 감사 로그를 갖춘 엔터프라이즈급 클라우드 인프라에서 실행됩니다.',
         ],
         links: [{ label: 'Security overview 로 이동', href: '/#security' }],
       },
@@ -674,65 +911,61 @@ const faqCopyByLocale: Record<SiteLocale, SiteFaqCopy> = {
   },
   id: {
     kicker: 'FAQ',
-    title: 'Pertanyaan umum tentang API key dan mem9 API',
-    description:
-      'Ini adalah pertanyaan yang paling sering kami terima lewat email onboarding dan dari pengguna API pertama kali.',
+    title: 'Pertanyaan Umum',
+    description: 'Jawaban cepat tentang API key, keamanan, dan penggunaan mem9.',
     items: [
       {
         question: 'Bagaimana cara mendapatkan mem9 API key?',
         answer: [
-          'Ada dua jalur resmi. Cara tercepat adalah menempelkan onboarding command di bawah ini ke OpenClaw lalu mengikuti alur SKILL.md untuk setup atau reconnect.',
-          'Jika Anda ingin membuat key secara programatis, panggil endpoint provision hosted. Nilai `id` di response adalah mem9 API key Anda.',
+          'Pilih jalur yang sesuai dengan cara Anda memakai mem9. Semua jalur menghasilkan Key yang terhubung ke ruang memori yang sama.',
+        ],
+        groups: [
+          {
+            label: 'Pengguna OpenClaw',
+            body: 'Tempelkan perintah ini ke obrolan OpenClaw Anda. OpenClaw akan menginstal mem9 dan menyediakan API Key secara otomatis.',
+            example: { label: 'Tempel di OpenClaw', code: stableOnboardingCommand },
+          },
+          {
+            label: 'Agent lain',
+            body: 'Buka panduan setup untuk agent Anda. Masing-masing menyediakan instalasi satu langkah atau readme plugin yang juga mengurus pembuatan Key.',
+            link: { label: 'Lihat semua agent yang didukung', href: '#platforms' },
+          },
+          {
+            label: 'Integrasi kustom',
+            body: 'Buat Key sendiri lewat HTTP API, lalu kirim sebagai header `X-API-Key`.',
+            example: { label: 'Buat via API', code: provisionKeyCode },
+            link: { label: 'Buka referensi API', href: '/api' },
+          },
+        ],
+      },
+      {
+        question: 'Bagaimana cara menjaga keamanan API key?',
+        answer: [
+          'Perlakukan API Key seperti kata sandi. Siapa pun yang memiliki Key dapat membaca dan menulis memori Anda.',
         ],
         bullets: [
-          'Gunakan key yang sama nanti di Your Memory atau di mesin tepercaya lainnya.',
-          'Simpan sebagai rahasia. Siapa pun yang memiliki key ini dapat mengakses mem9 space tersebut.',
-        ],
-        links: [
-          { label: 'Buka SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-          { label: 'Buka referensi API', href: '/api' },
-        ],
-        examples: [
-          { label: 'Onboarding command', code: stableOnboardingCommand },
-          { label: 'Provision langsung', code: provisionKeyCode },
-        ],
-      },
-      {
-        question: 'Bisakah API key yang sama dipakai di mesin lain atau di Your Memory?',
-        answer: [
-          'Ya. API key yang sama akan menghubungkan kembali ke mem9 space yang sama di mesin tepercaya lainnya.',
-          'Nilai yang sama juga dipakai di Your Memory. Jika dashboard meminta Space ID, masukkan API key tersebut.',
-        ],
-        links: [{ label: 'Buka Your Memory', href: 'https://mem9.ai/your-memory', external: true }],
-      },
-      {
-        question: 'Bagaimana sebaiknya menyimpan API key?',
-        answer: [
-          'Perlakukan API key sebagai secret. Simpan di password manager, secure vault, atau secret store lain yang terkontrol.',
+          'Simpan di password manager atau secret store yang terkontrol.',
           'Jangan commit ke repository, jangan tampilkan di screenshot, dan jangan bagikan di channel publik.',
+          'Jika bocor, segera rotasi dengan membuat Key baru.',
+        ],
+      },
+      {
+        question: 'Bisakah saya menggunakan API key yang sama di beberapa mesin dan agent?',
+        answer: [
+          'Ya. Key yang sama terhubung ke ruang memori yang sama dari mesin, agent, atau dasbor Your Memory mana pun.',
         ],
       },
       {
         question: 'Apa saja yang bisa dilakukan dengan mem9 API?',
         answer: [
-          'Hosted API memungkinkan Anda membuat key, membuat dan mencari memory, memperbarui atau menghapus memory, mengunggah file memory / session, dan membaca session messages yang tersimpan.',
-          'Untuk penggunaan harian, sebagian besar cukup memakai `v1alpha2` dengan `X-API-Key`.',
+          'Membaca, menulis, mencari, dan mengelola memori serta sesi. Sebagian besar integrasi menggunakan endpoint `v1alpha2` dengan header `X-API-Key`.',
         ],
         links: [{ label: 'Lihat semua endpoint', href: '/api' }],
       },
       {
-        question: 'Apa perbedaan `v1alpha1` dan `v1alpha2`?',
+        question: 'Apakah data saya aman?',
         answer: [
-          '`v1alpha1` terutama dipakai untuk membuat key baru dan rute kompatibilitas tenant-scoped lama.',
-          '`v1alpha2` adalah jalur hosted normal untuk read/write, import, dan lookup session. Kirim key di `X-API-Key`, lalu tambahkan `X-Mnemo-Agent-Id` jika Anda ingin atribusi agent.',
-        ],
-        links: [{ label: 'Lihat detail versi dan auth', href: '/api' }],
-      },
-      {
-        question: 'Apakah mem9 aman?',
-        answer: [
-          'mem9 dibangun di atas infrastruktur cloud kelas enterprise dengan enkripsi saat transit dan saat tersimpan, kontrol akses, auditabilitas, dan batas operasional yang jelas.',
-          'Jika Anda membutuhkan materi trust yang lebih detail, mulai dari ringkasan security di homepage lalu hubungi tim untuk materi tambahan.',
+          'mem9 berjalan di infrastruktur cloud kelas enterprise dengan enkripsi saat transit dan saat tersimpan, kontrol akses, dan log audit.',
         ],
         links: [{ label: 'Lompat ke ringkasan security', href: '/#security' }],
       },
@@ -740,64 +973,61 @@ const faqCopyByLocale: Record<SiteLocale, SiteFaqCopy> = {
   },
   th: {
     kicker: 'FAQ',
-    title: 'คำถามที่พบบ่อยเกี่ยวกับ API key และ mem9 API',
-    description: 'นี่คือคำถามที่เราได้รับบ่อยที่สุดจากอีเมล onboarding และผู้ใช้ที่เริ่มใช้ API เป็นครั้งแรก',
+    title: 'คำถามที่พบบ่อย',
+    description: 'คำตอบด่วนเกี่ยวกับ API Key ความปลอดภัย และการใช้งาน mem9',
     items: [
       {
         question: 'จะขอ mem9 API key ได้อย่างไร?',
         answer: [
-          'มี 2 วิธีอย่างเป็นทางการ วิธีที่เร็วที่สุดคือวาง onboarding command ด้านล่างให้ OpenClaw แล้วให้มันทำตามขั้นตอนใน SKILL.md เพื่อ setup หรือ reconnect ให้คุณ',
-          'ถ้าต้องการสร้าง key ผ่านโปรแกรมโดยตรง ให้เรียก hosted provision endpoint ค่าที่อยู่ใน `id` ของ response คือ mem9 API key ของคุณ',
+          'เลือกเส้นทางที่ตรงกับวิธีใช้ mem9 ของคุณ ทุกเส้นทางจะออก Key ที่ผูกกับพื้นที่หน่วยความจำเดียวกัน',
+        ],
+        groups: [
+          {
+            label: 'ผู้ใช้ OpenClaw',
+            body: 'วางคำสั่งนี้ลงในแชท OpenClaw แล้ว OpenClaw จะติดตั้ง mem9 และออก API Key ให้คุณโดยอัตโนมัติ',
+            example: { label: 'วางใน OpenClaw', code: stableOnboardingCommand },
+          },
+          {
+            label: 'เอเจนต์อื่น ๆ',
+            body: 'เปิดคู่มือตั้งค่าของเอเจนต์ที่คุณใช้ ทุกคู่มือมีคำสั่งติดตั้งหรือ readme ของปลั๊กอิน ที่จัดการเรื่องการขอ Key ให้เรียบร้อย',
+            link: { label: 'ดูเอเจนต์ที่รองรับ', href: '#platforms' },
+          },
+          {
+            label: 'สร้างการเชื่อมต่อเอง',
+            body: 'สร้าง Key ผ่าน HTTP API ของเรา แล้วส่งผ่าน header `X-API-Key`',
+            example: { label: 'ออก Key ผ่าน API', code: provisionKeyCode },
+            link: { label: 'เปิดเอกสาร API', href: '/api' },
+          },
+        ],
+      },
+      {
+        question: 'จะรักษาความปลอดภัยของ API key อย่างไร?',
+        answer: [
+          'ปฏิบัติกับ API Key เหมือนรหัสผ่าน ใครก็ตามที่มี Key สามารถอ่านและเขียนหน่วยความจำของคุณได้',
         ],
         bullets: [
-          'ใช้ key เดียวกันนี้ต่อใน Your Memory หรือบนเครื่องที่เชื่อถือได้เครื่องอื่น',
-          'เก็บเป็นความลับ เพราะใครก็ตามที่มี key นี้สามารถเข้าถึง mem9 space นั้นได้',
-        ],
-        links: [
-          { label: 'เปิด SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-          { label: 'เปิดเอกสาร API', href: '/api' },
-        ],
-        examples: [
-          { label: 'Onboarding command', code: stableOnboardingCommand },
-          { label: 'Provision โดยตรง', code: provisionKeyCode },
-        ],
-      },
-      {
-        question: 'ใช้ API key เดียวกันบนอีกเครื่องหรือใน Your Memory ได้ไหม?',
-        answer: [
-          'ได้ API key เดียวกันจะเชื่อมกลับไปยัง mem9 space เดิมบนอีกเครื่องที่เชื่อถือได้',
-          'ค่าเดียวกันนี้ยังใช้กับ Your Memory ด้วย หาก dashboard ขอ Space ID ให้ใส่ API key นี้',
-        ],
-        links: [{ label: 'เปิด Your Memory', href: 'https://mem9.ai/your-memory', external: true }],
-      },
-      {
-        question: 'ควรเก็บ API key อย่างไร?',
-        answer: [
-          'ให้ปฏิบัติกับ API key เหมือน secret และเก็บไว้ใน password manager, secure vault หรือ secret store ที่ควบคุมได้',
+          'เก็บไว้ใน password manager หรือ secret store ที่ควบคุมได้',
           'อย่า commit ลง repository อย่าให้ติดใน screenshot และอย่าแชร์ในช่องทางสาธารณะ',
+          'หากรั่วไหล ให้สร้าง Key ใหม่เพื่อหมุนเวียนทันที',
+        ],
+      },
+      {
+        question: 'ใช้ API key เดียวกันข้ามเครื่องและเอเจนต์ได้ไหม?',
+        answer: [
+          'ได้ Key เดียวกันเชื่อมต่อกับพื้นที่หน่วยความจำเดียวกันจากทุกเครื่อง เอเจนต์ หรือแดชบอร์ด Your Memory',
         ],
       },
       {
         question: 'mem9 API ทำอะไรได้บ้าง?',
         answer: [
-          'hosted API ใช้สร้าง key, สร้างและค้นหา memory, อัปเดตหรือลบ memory, อัปโหลดไฟล์ memory / session และอ่าน session messages ที่ถูกเก็บไว้',
-          'สำหรับการใช้งานประจำวัน ส่วนใหญ่ใช้แค่ `v1alpha2` พร้อม `X-API-Key` ก็เพียงพอ',
+          'อ่าน เขียน ค้นหา และจัดการหน่วยความจำกับเซสชัน การผสานการทำงานส่วนใหญ่ใช้ endpoint `v1alpha2` พร้อม header `X-API-Key`',
         ],
         links: [{ label: 'ดู endpoint ทั้งหมด', href: '/api' }],
       },
       {
-        question: '`v1alpha1` กับ `v1alpha2` ต่างกันอย่างไร?',
+        question: 'ข้อมูลของฉันปลอดภัยไหม?',
         answer: [
-          '`v1alpha1` ใช้หลัก ๆ สำหรับสร้าง key ใหม่และรองรับ legacy tenant-scoped routes',
-          '`v1alpha2` คือเส้นทาง hosted ปกติสำหรับ read/write, import และ session lookup ให้ส่ง key ผ่าน `X-API-Key` และเพิ่ม `X-Mnemo-Agent-Id` ได้หากต้องการระบุ agent',
-        ],
-        links: [{ label: 'ดูรายละเอียดเวอร์ชันและ auth', href: '/api' }],
-      },
-      {
-        question: 'mem9 ปลอดภัยไหม?',
-        answer: [
-          'mem9 ทำงานบนโครงสร้างพื้นฐานคลาวด์ระดับองค์กร พร้อมการเข้ารหัสทั้งขณะส่งและขณะเก็บ การควบคุมสิทธิ์ การตรวจสอบย้อนหลังได้ และขอบเขตการปฏิบัติการที่ชัดเจน',
-          'หากต้องการข้อมูลด้านความน่าเชื่อถือเพิ่มเติม ให้เริ่มจาก security overview บนหน้าแรก แล้วติดต่อทีมเพื่อขอเอกสารเพิ่ม',
+          'mem9 ทำงานบนโครงสร้างพื้นฐานคลาวด์ระดับองค์กร พร้อมการเข้ารหัสทั้งขณะส่งและขณะเก็บ การควบคุมสิทธิ์ และ audit log',
         ],
         links: [{ label: 'ไปที่ security overview', href: '/#security' }],
       },
@@ -806,12 +1036,12 @@ const faqCopyByLocale: Record<SiteLocale, SiteFaqCopy> = {
 };
 
 const hostedReadHeaders: SiteApiFieldCopy[] = [
-  { name: 'X-API-Key', description: 'Hosted API key for your mem9 space.', required: true },
+  { name: 'X-API-Key', description: 'mem9 API key for your space.', required: true },
   { name: 'X-Mnemo-Agent-Id', description: 'Optional agent identity header for attribution.' },
 ];
 
 const hostedJSONWriteHeaders: SiteApiFieldCopy[] = [
-  { name: 'X-API-Key', description: 'Hosted API key for your mem9 space.', required: true },
+  { name: 'X-API-Key', description: 'mem9 API key for your space.', required: true },
   { name: 'Content-Type', description: 'Set to `application/json` for JSON request bodies.', required: true },
   { name: 'X-Mnemo-Agent-Id', description: 'Optional agent identity header for attribution.' },
 ];
@@ -822,7 +1052,7 @@ const hostedUpdateHeaders: SiteApiFieldCopy[] = [
 ];
 
 const hostedMultipartHeaders: SiteApiFieldCopy[] = [
-  { name: 'X-API-Key', description: 'Hosted API key for your mem9 space.', required: true },
+  { name: 'X-API-Key', description: 'mem9 API key for your space.', required: true },
   {
     name: 'Content-Type',
     description: 'Your HTTP client sends this as `multipart/form-data`.',
@@ -831,27 +1061,60 @@ const hostedMultipartHeaders: SiteApiFieldCopy[] = [
   { name: 'X-Mnemo-Agent-Id', description: 'Optional agent identity header for attribution.' },
 ];
 
+const chainManagementHeaders: SiteApiFieldCopy[] = [
+  { name: 'X-API-Key', description: 'Active Space Chain API key for this chain.', required: true },
+];
+
+const chainJSONWriteHeaders: SiteApiFieldCopy[] = [
+  { name: 'X-API-Key', description: 'Active Space Chain API key for this chain.', required: true },
+  { name: 'Content-Type', description: 'Set to `application/json` for JSON request bodies.', required: true },
+];
+
 const memoryCreateBodyFields: SiteApiFieldCopy[] = [
-  { name: 'content', description: 'Plain memory content for direct writes.' },
-  { name: 'messages', description: 'Conversation messages for ingest-based writes.' },
+  { name: 'content', description: 'Plain memory content for direct writes. Required when `messages` is absent.' },
+  { name: 'messages', description: 'Conversation messages for ingest-based writes. Required when `content` is absent.' },
+  {
+    name: 'appId',
+    description:
+      'Optional application isolation id, max 100 characters. Omitted, null, empty, or whitespace values write to the default/global appId; non-empty values are trimmed and stored exactly.',
+  },
+  { name: 'memory_type', description: 'Only accepted with `content` writes. Use `insight` or `pinned`; defaults to `insight`.' },
   { name: 'agent_id', description: 'Optional agent id to store with the write.' },
   { name: 'session_id', description: 'Optional session id for ingest or attribution.' },
   { name: 'tags', description: 'Optional string tags stored on the memory.' },
   { name: 'metadata', description: 'Optional JSON metadata payload.' },
   { name: 'mode', description: 'Ingest mode such as `smart` or `raw` when using `messages`.' },
   { name: 'sync', description: 'When true, wait for completion before returning.' },
+  { name: 'disableSessionSave', description: 'Message ingest only. When true, skip raw session persistence and only extract/reconcile facts.' },
 ];
 
 const memoryListQueryParams: SiteApiFieldCopy[] = [
-  { name: 'q', description: 'Semantic / keyword search query.' },
+  { name: 'q', description: 'Search query. Omit to list memories by filters.' },
+  {
+    name: 'search_mode',
+    description:
+      'Optional search behavior. Use `keyword` for direct content substring matching in list UIs; omit it for the default recall-style search.',
+  },
   { name: 'tags', description: 'Comma-separated tag filter.' },
   { name: 'source', description: 'Filter by stored source value.' },
   { name: 'state', description: 'Filter by lifecycle state such as `active` or `archived`.' },
   { name: 'memory_type', description: 'Filter by `insight`, `pinned`, or `session`.' },
   { name: 'agent_id', description: 'Filter by agent id.' },
   { name: 'session_id', description: 'Filter by session id.' },
+  {
+    name: 'appId',
+    description:
+      'Optional appId filter. Omit to search all appIds, pass a value for exact isolation, or use `appId=null` / `appId=` for default/global.',
+  },
   { name: 'limit', description: 'Page size. The handler caps large values.' },
   { name: 'offset', description: 'Offset for pagination.' },
+  { name: 'sort_by', description: 'Sort field used when listing memories, such as `updated_at`.' },
+  { name: 'sort_dir', description: 'Sort direction, `asc` or `desc`.' },
+  {
+    name: 'scanAll',
+    description:
+      'Space Chain keys only. When true, recall searches every node and globally reranks the merged facts.',
+  },
 ];
 
 const memoryUpdateBodyFields: SiteApiFieldCopy[] = [
@@ -860,15 +1123,27 @@ const memoryUpdateBodyFields: SiteApiFieldCopy[] = [
   { name: 'metadata', description: 'Updated JSON metadata payload.' },
 ];
 
+const batchDeleteBodyFields: SiteApiFieldCopy[] = [
+  { name: 'ids', description: 'Array of memory ids to delete.', required: true },
+];
+
 const importBodyFields: SiteApiFieldCopy[] = [
   { name: 'file', description: 'Uploaded file payload.', required: true },
   { name: 'file_type', description: 'Use `memory` or `session`.', required: true },
   { name: 'agent_id', description: 'Optional agent id for attribution.' },
   { name: 'session_id', description: 'Required when uploading `session` files.' },
+  { name: 'file.appId', description: 'Optional top-level appId inside JSON memory/session files.' },
+  { name: 'file.memories[].appId', description: 'Optional per-memory appId override inside JSON memory files.' },
+  { name: 'file.sessions[].appId', description: 'Optional per-session appId override inside JSON session files.' },
 ];
 
 const sessionMessagesQueryParams: SiteApiFieldCopy[] = [
   { name: 'session_id', description: 'Repeat this query param for each session to fetch.', required: true },
+  {
+    name: 'appId',
+    description:
+      'Optional appId filter. Omit to fetch matching sessions across all appIds, or use `appId=null` / `appId=` for default/global.',
+  },
   { name: 'limit_per_session', description: 'Optional per-session row limit.' },
 ];
 
@@ -878,6 +1153,15 @@ const provisionResponseFields: SiteApiFieldCopy[] = [
 
 const healthResponseFields: SiteApiFieldCopy[] = [
   { name: 'status', description: 'Health status string. Hosted service returns `ok`.', required: true },
+];
+
+const versionResponseFields: SiteApiFieldCopy[] = [
+  { name: 'go_version', description: 'Go runtime version used by the server.', required: true },
+  { name: 'started_at', description: 'Server start timestamp.', required: true },
+];
+
+const keyStatusResponseFields: SiteApiFieldCopy[] = [
+  { name: 'status', description: '`active` when the key can be used, otherwise `inactive`.', required: true },
 ];
 
 const memoryListResponseFields: SiteApiFieldCopy[] = [
@@ -891,10 +1175,21 @@ const memoryObjectResponseFields: SiteApiFieldCopy[] = [
   { name: 'id', description: 'Memory id.', required: true },
   { name: 'content', description: 'Stored memory content.', required: true },
   { name: 'memory_type', description: 'Memory type such as `insight`, `pinned`, or `session`.', required: true },
+  { name: 'appId', description: 'Application isolation id. Empty string means default/global.' },
+  { name: 'source', description: 'Stored source value when present.' },
+  { name: 'tags', description: 'String tag array when present.' },
+  { name: 'metadata', description: 'Raw JSON metadata when present.' },
+  { name: 'agent_id', description: 'Agent id associated with the memory when present.' },
+  { name: 'session_id', description: 'Session id associated with the memory when present.' },
+  { name: 'updated_by', description: 'Agent or actor that last updated the memory when present.' },
+  { name: 'superseded_by', description: 'Replacement memory id when this memory has been superseded.' },
   { name: 'state', description: 'Lifecycle state.', required: true },
   { name: 'version', description: 'Current integer version.', required: true },
   { name: 'created_at', description: 'Creation timestamp.', required: true },
   { name: 'updated_at', description: 'Last update timestamp.', required: true },
+  { name: 'score', description: 'Search relevance score when returned by search endpoints.' },
+  { name: 'confidence', description: 'Recall confidence score when returned by recall-style search.' },
+  { name: 'relative_age', description: 'Human-readable recency string populated for query-time search results.' },
 ];
 
 const statusOnlyResponseFields: SiteApiFieldCopy[] = [
@@ -922,57 +1217,610 @@ const importTaskDetailResponseFields: SiteApiFieldCopy[] = [
 
 const sessionMessagesResponseFields: SiteApiFieldCopy[] = [
   { name: 'messages', description: 'Array of captured session message rows.', required: true },
+  { name: 'messages[].id', description: 'Session message row id.', required: true },
+  { name: 'messages[].session_id', description: 'Session id for the row.' },
+  { name: 'messages[].agent_id', description: 'Agent id for the row when present.' },
+  { name: 'messages[].appId', description: 'Application isolation id for each raw session row.' },
+  { name: 'messages[].seq', description: 'Sequence number within the session.', required: true },
+  { name: 'messages[].role', description: 'Message role such as `user` or `assistant`.', required: true },
+  { name: 'messages[].content', description: 'Message content.', required: true },
+  { name: 'messages[].content_type', description: 'Content type for the captured message.', required: true },
+  { name: 'messages[].tags', description: 'Captured tags for the row.', required: true },
+  { name: 'messages[].state', description: 'Lifecycle state for the row.', required: true },
+  { name: 'messages[].created_at', description: 'Creation timestamp.', required: true },
+  { name: 'messages[].updated_at', description: 'Last update timestamp.', required: true },
   { name: 'limit_per_session', description: 'Applied per-session limit.', required: true },
 ];
+
+const spaceChainCreateBodyFields: SiteApiFieldCopy[] = [
+  { name: 'name', description: 'Human-readable Space Chain name.', required: true },
+  { name: 'project_id', description: 'Optional project id for control-plane ownership.' },
+  { name: 'description', description: 'Optional Space Chain description.' },
+  { name: 'created_by_user_id', description: 'Optional user id for audit attribution.' },
+];
+
+const spaceChainCreateResponseFields: SiteApiFieldCopy[] = [
+  { name: 'chain', description: 'Created Space Chain object.', required: true },
+  { name: 'chain_api_key', description: 'New plaintext Space Chain API key. Store it now.', required: true },
+  { name: 'binding_id', description: 'Identifier of the initial key binding.', required: true },
+  { name: 'key_prefix', description: 'Space Chain key prefix, currently `chain_`.', required: true },
+  { name: 'key_preview', description: 'Short masked preview of the new key.', required: true },
+];
+
+const spaceChainObjectResponseFields: SiteApiFieldCopy[] = [
+  { name: 'id', description: 'Space Chain id.', required: true },
+  { name: 'project_id', description: 'Owning project id when present.' },
+  { name: 'name', description: 'Space Chain name.', required: true },
+  { name: 'description', description: 'Space Chain description.' },
+  { name: 'bindings', description: 'Key bindings when included.' },
+  { name: 'nodes', description: 'Ordered node list when included.' },
+  { name: 'created_at', description: 'Creation timestamp.', required: true },
+  { name: 'updated_at', description: 'Last update timestamp.', required: true },
+];
+
+const spaceChainUpdateBodyFields: SiteApiFieldCopy[] = [
+  { name: 'name', description: 'Updated Space Chain name.', required: true },
+  { name: 'description', description: 'Updated description.' },
+];
+
+const spaceChainDeleteBodyFields: SiteApiFieldCopy[] = [
+  { name: 'deleted_by_user_id', description: 'Optional user id for audit attribution.' },
+];
+
+const spaceChainNodesBodyFields: SiteApiFieldCopy[] = [
+  { name: 'nodes', description: 'Ordered array of Space Chain node inputs.', required: true },
+  { name: 'nodes[].tenant_id', description: 'Space API key / tenant id for the node.', required: true },
+  { name: 'nodes[].external_space_id', description: 'Optional console Space id for display and sync.' },
+  { name: 'nodes[].display_name', description: 'Optional display name for the node.' },
+];
+
+const spaceChainRoutingPolicyPathFields: SiteApiFieldCopy[] = [
+  { name: 'chain_id', description: 'Space Chain id.', required: true },
+  { name: 'node_id', description: 'Target node id. The first node cannot have a routing policy.', required: true },
+];
+
+const spaceChainRoutingPolicyBodyFields: SiteApiFieldCopy[] = [
+  { name: 'enabled', description: 'Whether this node participates in knowledge extraction routing.', required: true },
+  {
+    name: 'prompt',
+    description: 'Natural-language matching rule. Required when enabled is true; maximum 1,200 characters.',
+  },
+  {
+    name: 'webhook_only',
+    description:
+      'When true, matching facts are emitted through Space Chain webhooks but are not saved directly into the target Space.',
+  },
+];
+
+const spaceChainNodeResponseFields: SiteApiFieldCopy[] = [
+  { name: 'id', description: 'Space Chain node id.', required: true },
+  { name: 'chain_id', description: 'Space Chain id.', required: true },
+  { name: 'tenant_id', description: 'Target Space API key / tenant id.', required: true },
+  { name: 'external_space_id', description: 'Console Space id used as the routing target identifier when present.' },
+  { name: 'display_name', description: 'Display name for the target Space when present.' },
+  { name: 'position', description: 'Zero-based node position.', required: true },
+  { name: 'routing_policy_enabled', description: 'Whether knowledge extraction routing is enabled.', required: true },
+  { name: 'routing_policy_prompt', description: 'Natural-language matching rule when configured.' },
+  {
+    name: 'routing_policy_webhook_only',
+    description: 'Whether matching facts are delivered only through Space Chain webhooks.',
+    required: true,
+  },
+  { name: 'created_at', description: 'Creation timestamp.', required: true },
+  { name: 'updated_at', description: 'Last update timestamp.', required: true },
+];
+
+const spaceChainNodesResponseFields: SiteApiFieldCopy[] = [
+  { name: 'nodes', description: 'Ordered node list. Positions are zero-based.', required: true },
+  ...spaceChainNodeResponseFields.map((field) => ({ ...field, name: `nodes[].${field.name}` })),
+];
+
+const spaceChainBindingsResponseFields: SiteApiFieldCopy[] = [
+  { name: 'bindings', description: 'Array of Space Chain API key bindings.', required: true },
+];
+
+const spaceChainBindingBodyFields: SiteApiFieldCopy[] = [
+  { name: 'chain_api_key', description: 'Optional caller-supplied key. Omit to generate one.' },
+  { name: 'created_by_user_id', description: 'Optional user id for audit attribution.' },
+];
+
+const spaceChainBindingResponseFields: SiteApiFieldCopy[] = [
+  { name: 'id', description: 'Binding id.', required: true },
+  { name: 'chain_id', description: 'Space Chain id.', required: true },
+  { name: 'chain_api_key', description: 'Plaintext key for newly created bindings.', required: true },
+  { name: 'disabled', description: 'Whether this key binding is disabled.', required: true },
+  { name: 'created_at', description: 'Creation timestamp.', required: true },
+];
+
+const spaceChainDisableBindingBodyFields: SiteApiFieldCopy[] = [
+  { name: 'disabled', description: 'Must be `true`.', required: true },
+  { name: 'disabled_by_user_id', description: 'Optional user id for audit attribution.' },
+];
+
+const spaceChainRuntimeResponseFields: SiteApiFieldCopy[] = [
+  { name: 'memories', description: 'Merged memories from the visited Space Chain nodes.', required: true },
+  { name: 'total', description: 'Matched rows before pagination after chain-level de-duplication.', required: true },
+  { name: 'limit', description: 'Applied page size.', required: true },
+  { name: 'offset', description: 'Applied page offset.', required: true },
+];
+
+const webhookCreateBodyFields: SiteApiFieldCopy[] = [
+  { name: 'name', description: 'Human-readable endpoint name.', required: true },
+  { name: 'url', description: 'Receiver URL. Production deployments require HTTPS.', required: true },
+  { name: 'enabled', description: 'Whether the endpoint accepts matching events. Defaults to true on create.' },
+  {
+    name: 'events',
+    description: 'Array of event types to subscribe to: `memory.added`, `memory.deleted`, or `space_chain.fact_routed`.',
+    required: true,
+  },
+];
+
+const webhookUpdateBodyFields: SiteApiFieldCopy[] = [
+  { name: 'name', description: 'Updated endpoint name.' },
+  { name: 'url', description: 'Updated receiver URL.' },
+  { name: 'enabled', description: 'Whether the endpoint accepts matching events.' },
+  {
+    name: 'events',
+    description: 'Replacement array of subscribed event types.',
+  },
+];
+
+const webhookDeliveryQueryParams: SiteApiFieldCopy[] = [
+  { name: 'limit', description: 'Maximum number of deliveries to return. Defaults to 50 and caps at 200.' },
+];
+
+const webhookEndpointResponseFields: SiteApiFieldCopy[] = [
+  { name: 'id', description: 'Webhook endpoint id.', required: true },
+  { name: 'scope_type', description: 'Scope type. Space endpoints return `tenant`; Space Chain endpoints return `chain`.', required: true },
+  { name: 'scope_id', description: 'Tenant id for Space webhooks or chain id for Space Chain webhooks.', required: true },
+  { name: 'name', description: 'Human-readable endpoint name.', required: true },
+  { name: 'url', description: 'Receiver URL.', required: true },
+  { name: 'enabled', description: 'Whether the endpoint accepts matching events.', required: true },
+  { name: 'events', description: 'Subscribed event type array.', required: true },
+  { name: 'created_at', description: 'Creation timestamp.', required: true },
+  { name: 'updated_at', description: 'Last update timestamp.', required: true },
+];
+
+const webhookEndpointListResponseFields: SiteApiFieldCopy[] = [
+  { name: 'webhooks', description: 'Array of webhook endpoints.', required: true },
+];
+
+const webhookEndpointSecretResponseFields: SiteApiFieldCopy[] = [
+  ...webhookEndpointResponseFields,
+  {
+    name: 'signing_secret',
+    description: 'One-time signing secret returned only by create and rotate-secret responses.',
+    required: true,
+  },
+];
+
+const webhookDeliveryResponseFields: SiteApiFieldCopy[] = [
+  { name: 'id', description: 'Delivery id.', required: true },
+  { name: 'event_id', description: 'Event id.', required: true },
+  { name: 'endpoint_id', description: 'Webhook endpoint id for this delivery.', required: true },
+  { name: 'event_type', description: 'Event type delivered to the receiver.', required: true },
+  { name: 'scope_type', description: 'Delivery scope type.', required: true },
+  { name: 'scope_id', description: 'Delivery scope id.', required: true },
+  { name: 'status', description: 'Delivery status: `pending`, `delivered`, or `failed`.', required: true },
+  { name: 'attempt_count', description: 'Delivery attempt count.', required: true },
+  { name: 'next_attempt_at', description: 'Next retry timestamp for pending deliveries.', required: true },
+  { name: 'last_http_status', description: 'Most recent HTTP status returned by the receiver.' },
+  { name: 'last_error', description: 'Most recent delivery error message.' },
+  { name: 'delivered_at', description: 'Timestamp when delivery reached a 2xx response.' },
+  { name: 'created_at', description: 'Creation timestamp.', required: true },
+  { name: 'updated_at', description: 'Last update timestamp.', required: true },
+];
+
+const webhookDeliveryListResponseFields: SiteApiFieldCopy[] = [
+  { name: 'deliveries', description: 'Array of webhook delivery records.', required: true },
+];
+
+const webhookTestResponseFields: SiteApiFieldCopy[] = [
+  { name: 'delivery', description: 'Queued test delivery record.', required: true },
+];
+
+const keyStatusEndpointGroup: SiteApiEndpointGroupCopy = {
+  id: 'key-status',
+  title: 'Key Status',
+  description: 'Validate whether a Space key or Space Chain key is currently usable before making runtime calls.',
+  endpoints: [
+    {
+      method: 'GET',
+      path: '/v1alpha2/status',
+      summary: 'Check API key status.',
+      description:
+        'Send either a normal mem9 Space key or a Space Chain key in `X-API-Key`. The response is `active` or `inactive`; unknown keys return `404`.',
+      headers: [{ name: 'X-API-Key', description: 'Space API key or Space Chain API key.', required: true }],
+      responseFields: keyStatusResponseFields,
+      examples: [
+        { label: 'Check Space key', code: keyStatusCode },
+        { label: 'Check Space Chain key', code: chainKeyStatusCode },
+      ],
+    },
+  ],
+};
+
+const batchDeleteMemoryEndpoint: SiteApiEndpointCopy = {
+  method: 'POST',
+  path: '/v1alpha2/mem9s/memories/batch-delete',
+  summary: 'Delete multiple memories.',
+  description:
+    'Deletes the provided memory ids in one request. When authenticated with a Space Chain key, the handler resolves each id to the node that owns it.',
+  headers: hostedJSONWriteHeaders,
+  bodyFields: batchDeleteBodyFields,
+  examples: [{ label: 'Batch delete memories', code: batchDeleteMemoryCode }],
+};
+
+const spaceChainEndpointGroup: SiteApiEndpointGroupCopy = {
+  id: 'space-chains',
+  title: 'Space Chains',
+  description:
+    'Create and manage ordered chains of Spaces. Runtime memory endpoints accept a Space Chain key and search the chain in node order, or all nodes when `scanAll=true`.',
+  endpoints: [
+    {
+      method: 'POST',
+      path: '/v1alpha2/space-chains',
+      summary: 'Create a Space Chain.',
+      description:
+        'Creates a Space Chain and returns its first plaintext chain key once. Store `chain_api_key` securely; later list responses only expose masked or bound key records.',
+      headers: [{ name: 'Content-Type', description: 'Set to `application/json` for JSON request bodies.', required: true }],
+      bodyFields: spaceChainCreateBodyFields,
+      responseFields: spaceChainCreateResponseFields,
+      examples: [
+        { label: 'Create Space Chain', code: createSpaceChainCode },
+        { label: 'Export Space Chain env vars', code: exportChainApiEnvCode },
+      ],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/space-chains/by-key',
+      summary: 'Read the Space Chain for a key.',
+      description: 'Looks up the active Space Chain associated with the `X-API-Key` chain key.',
+      headers: chainManagementHeaders,
+      responseFields: spaceChainObjectResponseFields,
+      examples: [{ label: 'Get by key', code: getSpaceChainByKeyCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/space-chains/{chain_id}',
+      summary: 'Read one Space Chain.',
+      description: 'Returns chain metadata, nodes, and bindings for a chain key authorized to manage this Space Chain.',
+      headers: chainManagementHeaders,
+      responseFields: spaceChainObjectResponseFields,
+      examples: [{ label: 'Get Space Chain', code: getSpaceChainCode }],
+    },
+    {
+      method: 'PATCH',
+      path: '/v1alpha2/space-chains/{chain_id}',
+      summary: 'Update Space Chain details.',
+      description: 'Updates the display name and description for a Space Chain.',
+      headers: chainJSONWriteHeaders,
+      bodyFields: spaceChainUpdateBodyFields,
+      responseFields: spaceChainObjectResponseFields,
+      examples: [{ label: 'Update Space Chain', code: updateSpaceChainCode }],
+    },
+    {
+      method: 'DELETE',
+      path: '/v1alpha2/space-chains/{chain_id}',
+      summary: 'Delete a Space Chain.',
+      description: 'Soft-deletes the Space Chain. A successful delete returns `204 No Content`.',
+      headers: chainJSONWriteHeaders,
+      bodyFields: spaceChainDeleteBodyFields,
+      examples: [{ label: 'Delete Space Chain', code: deleteSpaceChainCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/space-chains/{chain_id}/nodes',
+      summary: 'List Space Chain nodes.',
+      description: 'Returns the ordered node list. Node positions are zero-based and define sequential recall order.',
+      headers: chainManagementHeaders,
+      responseFields: spaceChainNodesResponseFields,
+      examples: [{ label: 'List nodes', code: listSpaceChainNodesCode }],
+    },
+    {
+      method: 'PUT',
+      path: '/v1alpha2/space-chains/{chain_id}/nodes',
+      summary: 'Replace Space Chain nodes.',
+      description:
+        'Replaces the entire ordered node list. Each node must reference a normal Space key / tenant id, not another Space Chain key.',
+      headers: chainJSONWriteHeaders,
+      bodyFields: spaceChainNodesBodyFields,
+      responseFields: spaceChainNodesResponseFields,
+      examples: [{ label: 'Replace nodes', code: replaceSpaceChainNodesCode }],
+    },
+    {
+      method: 'PUT',
+      path: '/v1alpha2/space-chains/{chain_id}/nodes/{node_id}/routing-policy',
+      summary: 'Update a Space Chain knowledge extraction policy.',
+      description:
+        'Configures a non-first target node for smart ingest routing. The node must have a non-empty `external_space_id`; nodes without one are not eligible routing targets. mem9 evaluates the natural-language prompt against each extracted fact and routes matching facts to this node. This policy controls extracted-fact writes; it does not filter recall queries.',
+      headers: chainJSONWriteHeaders,
+      pathParams: spaceChainRoutingPolicyPathFields,
+      bodyFields: spaceChainRoutingPolicyBodyFields,
+      responseFields: spaceChainNodeResponseFields,
+      examples: [{ label: 'Configure knowledge extraction routing', code: updateSpaceChainRoutingPolicyCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/space-chains/{chain_id}/bindings',
+      summary: 'List Space Chain key bindings.',
+      description: 'Returns all key bindings visible to the management key for this Space Chain.',
+      headers: chainManagementHeaders,
+      responseFields: spaceChainBindingsResponseFields,
+      examples: [{ label: 'List bindings', code: listSpaceChainBindingsCode }],
+    },
+    {
+      method: 'POST',
+      path: '/v1alpha2/space-chains/{chain_id}/bindings',
+      summary: 'Create a Space Chain key binding.',
+      description: 'Creates another chain key. Omit `chain_api_key` to let mem9 generate a key.',
+      headers: chainJSONWriteHeaders,
+      bodyFields: spaceChainBindingBodyFields,
+      responseFields: spaceChainBindingResponseFields,
+      examples: [{ label: 'Create binding', code: createSpaceChainBindingCode }],
+    },
+    {
+      method: 'PATCH',
+      path: '/v1alpha2/space-chains/{chain_id}/bindings/{binding_id}',
+      summary: 'Disable a Space Chain key binding.',
+      description: 'Disables an active binding. The API rejects disabling the last active key for a chain.',
+      headers: chainJSONWriteHeaders,
+      bodyFields: spaceChainDisableBindingBodyFields,
+      examples: [{ label: 'Disable binding', code: disableSpaceChainBindingCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/mem9s/memories',
+      summary: 'Recall across a Space Chain.',
+      description:
+        'Use the normal memory search endpoint with a Space Chain key. By default recall visits nodes in order and stops early on high confidence; pass `scanAll=true` to search every node and globally rerank.',
+      headers: chainManagementHeaders,
+      queryParams: memoryListQueryParams,
+      responseFields: spaceChainRuntimeResponseFields,
+      examples: [{ label: 'Recall with scanAll', code: recallSpaceChainCode }],
+    },
+  ],
+};
+
+const webhookEndpointGroup: SiteApiEndpointGroupCopy = {
+  id: 'webhooks',
+  title: 'Webhooks',
+  description:
+    'Create signed event subscriptions for Spaces and Space Chains. mem9 stores endpoint state, delivery attempts, retry state, and delivery history.',
+  endpoints: [
+    {
+      method: 'GET',
+      path: '/v1alpha2/mem9s/webhooks',
+      summary: 'List Space webhooks.',
+      description: 'Lists webhook endpoints scoped to the Space API key in `X-API-Key`.',
+      headers: hostedReadHeaders,
+      responseFields: webhookEndpointListResponseFields,
+      examples: [{ label: 'List Space webhooks', code: listSpaceWebhooksCode }],
+    },
+    {
+      method: 'POST',
+      path: '/v1alpha2/mem9s/webhooks',
+      summary: 'Create a Space webhook.',
+      description:
+        'Creates a Space-scoped webhook endpoint. The response includes `signing_secret` once; store it before closing the response.',
+      headers: hostedJSONWriteHeaders,
+      bodyFields: webhookCreateBodyFields,
+      responseFields: webhookEndpointSecretResponseFields,
+      examples: [{ label: 'Create Space webhook', code: createSpaceWebhookCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/mem9s/webhooks/{webhookID}',
+      summary: 'Read one Space webhook.',
+      description: 'Returns one Space-scoped webhook endpoint without the signing secret.',
+      headers: hostedReadHeaders,
+      responseFields: webhookEndpointResponseFields,
+    },
+    {
+      method: 'PATCH',
+      path: '/v1alpha2/mem9s/webhooks/{webhookID}',
+      summary: 'Update a Space webhook.',
+      description: 'Updates endpoint name, URL, enabled state, or subscribed events.',
+      headers: hostedJSONWriteHeaders,
+      bodyFields: webhookUpdateBodyFields,
+      responseFields: webhookEndpointResponseFields,
+      examples: [{ label: 'Disable Space webhook', code: updateSpaceWebhookCode }],
+    },
+    {
+      method: 'DELETE',
+      path: '/v1alpha2/mem9s/webhooks/{webhookID}',
+      summary: 'Delete a Space webhook.',
+      description: 'Soft-deletes the endpoint. A successful delete returns `204 No Content`.',
+      headers: hostedReadHeaders,
+    },
+    {
+      method: 'POST',
+      path: '/v1alpha2/mem9s/webhooks/{webhookID}/test',
+      summary: 'Test a Space webhook.',
+      description: 'Queues a `webhook.test` delivery to the endpoint so you can verify the receiver and signature handling.',
+      headers: hostedReadHeaders,
+      responseFields: webhookTestResponseFields,
+      examples: [{ label: 'Test Space webhook', code: testSpaceWebhookCode }],
+    },
+    {
+      method: 'POST',
+      path: '/v1alpha2/mem9s/webhooks/{webhookID}/rotate-secret',
+      summary: 'Rotate a Space webhook secret.',
+      description: 'Replaces the signing secret and returns the new `signing_secret` once.',
+      headers: hostedReadHeaders,
+      responseFields: webhookEndpointSecretResponseFields,
+      examples: [{ label: 'Rotate Space webhook secret', code: rotateSpaceWebhookSecretCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/mem9s/webhook-deliveries',
+      summary: 'List Space webhook deliveries.',
+      description: 'Returns recent delivery records for the current Space scope.',
+      headers: hostedReadHeaders,
+      queryParams: webhookDeliveryQueryParams,
+      responseFields: webhookDeliveryListResponseFields,
+      examples: [{ label: 'List Space deliveries', code: listSpaceWebhookDeliveriesCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/space-chains/{chain_id}/webhooks',
+      summary: 'List Space Chain webhooks.',
+      description: 'Lists webhook endpoints scoped to a Space Chain. Requires the chain management key in `X-API-Key`.',
+      headers: chainManagementHeaders,
+      responseFields: webhookEndpointListResponseFields,
+      examples: [{ label: 'List Space Chain webhooks', code: listSpaceChainWebhooksCode }],
+    },
+    {
+      method: 'POST',
+      path: '/v1alpha2/space-chains/{chain_id}/webhooks',
+      summary: 'Create a Space Chain webhook.',
+      description:
+        'Creates a chain-scoped webhook endpoint. Use it for chain-level memory events and `space_chain.fact_routed` routing events.',
+      headers: chainJSONWriteHeaders,
+      bodyFields: webhookCreateBodyFields,
+      responseFields: webhookEndpointSecretResponseFields,
+      examples: [{ label: 'Create Space Chain webhook', code: createSpaceChainWebhookCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/space-chains/{chain_id}/webhooks/{webhookID}',
+      summary: 'Read one Space Chain webhook.',
+      description: 'Returns one chain-scoped webhook endpoint without the signing secret.',
+      headers: chainManagementHeaders,
+      responseFields: webhookEndpointResponseFields,
+    },
+    {
+      method: 'PATCH',
+      path: '/v1alpha2/space-chains/{chain_id}/webhooks/{webhookID}',
+      summary: 'Update a Space Chain webhook.',
+      description: 'Updates endpoint name, URL, enabled state, or subscribed events for a chain-scoped endpoint.',
+      headers: chainJSONWriteHeaders,
+      bodyFields: webhookUpdateBodyFields,
+      responseFields: webhookEndpointResponseFields,
+      examples: [{ label: 'Update Space Chain webhook', code: updateSpaceChainWebhookCode }],
+    },
+    {
+      method: 'DELETE',
+      path: '/v1alpha2/space-chains/{chain_id}/webhooks/{webhookID}',
+      summary: 'Delete a Space Chain webhook.',
+      description: 'Soft-deletes the chain-scoped endpoint. A successful delete returns `204 No Content`.',
+      headers: chainManagementHeaders,
+    },
+    {
+      method: 'POST',
+      path: '/v1alpha2/space-chains/{chain_id}/webhooks/{webhookID}/test',
+      summary: 'Test a Space Chain webhook.',
+      description: 'Queues a `webhook.test` delivery for a chain-scoped endpoint.',
+      headers: chainManagementHeaders,
+      responseFields: webhookTestResponseFields,
+      examples: [{ label: 'Test Space Chain webhook', code: testSpaceChainWebhookCode }],
+    },
+    {
+      method: 'POST',
+      path: '/v1alpha2/space-chains/{chain_id}/webhooks/{webhookID}/rotate-secret',
+      summary: 'Rotate a Space Chain webhook secret.',
+      description: 'Replaces the chain-scoped endpoint signing secret and returns the new `signing_secret` once.',
+      headers: chainManagementHeaders,
+      responseFields: webhookEndpointSecretResponseFields,
+      examples: [{ label: 'Rotate Space Chain webhook secret', code: rotateSpaceChainWebhookSecretCode }],
+    },
+    {
+      method: 'GET',
+      path: '/v1alpha2/space-chains/{chain_id}/webhook-deliveries',
+      summary: 'List Space Chain webhook deliveries.',
+      description: 'Returns recent delivery records for the Space Chain scope.',
+      headers: chainManagementHeaders,
+      queryParams: webhookDeliveryQueryParams,
+      responseFields: webhookDeliveryListResponseFields,
+      examples: [{ label: 'List Space Chain deliveries', code: listSpaceChainWebhookDeliveriesCode }],
+    },
+  ],
+};
+
+const versionEndpoint: SiteApiEndpointCopy = {
+  method: 'GET',
+  path: '/versionz',
+  summary: 'Check server version metadata.',
+  description: 'Returns runtime metadata that is useful for support and deployment verification.',
+  responseFields: versionResponseFields,
+  examples: [{ label: 'Version check', code: versionCheckCode }],
+};
 
 const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
   en: {
     meta: {
-      title: 'mem9 API | Hosted API Reference',
+      title: 'mem9 API | API Reference',
       description:
-        'Reference for provisioning API keys, reading and writing memories, importing files, and querying session messages on the hosted mem9 API.',
+        'Reference for provisioning API keys, reading and writing memories, importing files, appId isolation, and querying session messages with the mem9 API.',
     },
     kicker: 'API',
-    title: 'Hosted mem9 API reference',
+    title: 'mem9 API reference',
     intro:
-      'Use the hosted mem9 API to provision a space, write or search memory, import existing files, and inspect captured session messages.',
+      'Use the mem9 API to provision a space, write or search memory, isolate sub-spaces with appId, import existing files, and inspect captured session messages. The examples use mem9.ai; self-hosted deployments use the same routes under your own base URL.',
     summary:
       'Prefer `v1alpha2` for day-to-day usage. `v1alpha1` stays available for key provisioning and tenant-scoped compatibility.',
     labels: {
       headers: 'Headers',
       queryParams: 'Query Params',
       body: 'Body',
-      response: 'Response',
+      response: 'Response Body',
       examples: 'Examples',
       required: 'Required',
       next: 'Next',
       sidebarTitle: 'On this page',
       sidebarAuth: 'Authentication',
       sidebarQuickstart: 'Quick Start',
+      apiProduct: 'API product',
+      webConsole: 'Web Console',
+      yourMemory: 'Your Memory',
+      apiSearch: 'Search API',
+      apiSearchPlaceholder: 'Search path or name',
+      apiSearchEmpty: 'No matching APIs.',
+      testApi: 'Test API',
+      testTitle: 'Test API',
+      close: 'Close',
+      closeApiTestModal: 'Close API test modal',
+      reset: 'Reset',
+      run: 'Run',
+      baseUrl: 'Base URL',
+      pathParams: 'Path Params',
+      jsonBody: 'JSON body',
+      ready: 'Ready',
+      responseReady: 'Run a request to inspect the response.',
+      emptyResponse: 'empty response',
+      running: 'Running...',
+      runningRequest: 'Running request...',
+      requestFailed: 'Request failed',
+      pathParameter: 'Path parameter.',
+      saveFormInfo: 'Save form info',
     },
     authTitle: 'Base URL & authentication',
     authCards: [
       {
-        title: 'Hosted base URL',
-        body: 'Use `https://api.mem9.ai`. For normal client traffic, send requests to `https://api.mem9.ai/v1alpha2/mem9s/...`.',
+        title: 'Base URL',
+        body: 'For mem9.ai, use `https://api.mem9.ai`. For self-hosting, replace it with your deployment origin; runtime memory calls live under `/v1alpha2/mem9s/...`.',
       },
       {
-        title: 'Primary auth header',
-        body: 'Send your mem9 API key in `X-API-Key`. This is the default hosted auth model for `v1alpha2`.',
+        title: 'API key header',
+        body: 'Send the space API key in `X-API-Key` for `v1alpha2` runtime calls. mem9.ai keys can be provisioned with `POST /v1alpha1/mem9s`; self-hosted deployments use keys from their own control plane.',
       },
       {
-        title: 'Optional agent identity',
-        body: 'Send `X-Mnemo-Agent-Id` when you want writes and imports attributed to a specific agent. Legacy tenant-scoped routes still exist under `v1alpha1`.',
+        title: 'Agent identity',
+        body: '`X-Mnemo-Agent-Id` is optional. Use it to attribute writes and imports to a specific agent; request body `agent_id` takes precedence when both are present.',
+      },
+      {
+        title: 'appId isolation',
+        body: '`appId` partitions memories and raw sessions under the same API key. Omit `appId` to search all appIds, pass a value for exact scope, or pass `null`/empty for default global memory.',
       },
     ],
     quickstartTitle: 'Quick start',
     quickstartDescription:
-      'A minimal hosted flow is: provision a key, export it into your shell, then create and search memories.',
+      'A minimal mem9.ai flow is: provision a key, export it into your shell, then create and search memories. For self-hosting, keep the same paths and replace the base URL.',
     quickstartSteps: [
       'Provision a new API key with `POST /v1alpha1/mem9s`.',
       'Export that key as `API_KEY` and set `API=https://api.mem9.ai/v1alpha2/mem9s`.',
-      'Create a memory with `POST /memories`.',
-      'Search it back with `GET /memories?q=...`.',
+      'Create a memory with `POST /memories`. Add `appId` when one API key should hold separate app-specific memory pools.',
+      'Search it back with `GET /memories?q=...`. Omit `appId` to search all appIds, or pass one appId to isolate the result set.',
     ],
     quickstartExamples: [
       { label: 'Provision key', code: provisionKeyCode },
@@ -984,54 +1832,60 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       {
         id: 'provisioning',
         title: 'Provisioning',
-        description: 'Create the initial key you will reuse for hosted mem9 access.',
+        description: 'Create the initial key you will reuse for mem9.ai API access.',
         endpoints: [
           {
             method: 'POST',
             path: '/v1alpha1/mem9s',
             summary: 'Provision a new mem9 API key.',
             description:
-              'No auth or request body is required. The hosted service returns `201` with an `id` field, and that `id` is the key you store and reuse.',
+              'No auth or request body is required. The mem9.ai service returns `201` with an `id` field, and that `id` is the key you store and reuse.',
             responseFields: provisionResponseFields,
             examples: [{ label: 'Provision key', code: provisionKeyCode }],
           },
         ],
       },
+      keyStatusEndpointGroup,
       {
         id: 'memories',
         title: 'Memories',
-        description: 'Create, search, read, update, and delete stored memories in your mem9 space.',
+        description:
+          'Create, search, read, update, and delete stored memories in your mem9 space. The optional `appId` field lets one API key host multiple isolated application sub-spaces.',
         endpoints: [
           {
             method: 'POST',
             path: '/v1alpha2/mem9s/memories',
             summary: 'Create a memory or ingest messages.',
             description:
-              'Use `content` for direct writes or `messages` for ingest-driven writes. Do not send both in the same request.',
+              'Use `content` for direct writes or `messages` for ingest-driven writes. Do not send both in the same request. `appId` is optional; omitted, null, empty, and whitespace values are stored as the default/global appId.',
             headers: hostedJSONWriteHeaders,
             bodyFields: memoryCreateBodyFields,
             responseFields: statusOnlyResponseFields,
-            examples: [{ label: 'Create memory', code: createMemoryCode }],
+            examples: [
+              { label: 'Create memory', code: createMemoryCode },
+              { label: 'Smart ingest', code: smartIngestCode },
+            ],
           },
           {
             method: 'GET',
             path: '/v1alpha2/mem9s/memories',
             summary: 'List or search memories.',
             description:
-              'When `q` is present, the handler runs recall search. Without `q`, the endpoint behaves like a filtered list API.',
+              'When `q` is present, the handler runs recall search by default. Use `search_mode=keyword` for direct content substring matching. `appId` has three-state query semantics: omit it to search all appIds, pass a non-empty value for exact isolation, or pass `appId=null` / `appId=` for the default/global appId.',
             headers: hostedReadHeaders,
             queryParams: memoryListQueryParams,
             responseFields: memoryListResponseFields,
             examples: [
               { label: 'Search memories', code: listMemoryCode },
               { label: 'Filter by tags / source', code: filterMemoryCode },
+              { label: 'Direct content keyword search', code: keywordListMemoryCode },
             ],
           },
           {
             method: 'GET',
             path: '/v1alpha2/mem9s/memories/{id}',
             summary: 'Read one memory by id.',
-            description: 'Fetch a single stored memory object from the hosted service.',
+            description: 'Fetch a single stored memory object from the mem9 API.',
             headers: hostedReadHeaders,
             responseFields: memoryObjectResponseFields,
             examples: [{ label: 'Get memory', code: getMemoryCode }],
@@ -1055,12 +1909,15 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedReadHeaders,
             examples: [{ label: 'Delete memory', code: deleteMemoryCode }],
           },
+          batchDeleteMemoryEndpoint,
         ],
       },
+      spaceChainEndpointGroup,
+      webhookEndpointGroup,
       {
         id: 'imports',
         title: 'Imports',
-        description: 'Upload memory or session files and poll their background task status.',
+        description: 'Upload memory or session files and poll their background task status. Imported memories and raw sessions can carry `appId` at the file, memory, or session level.',
         endpoints: [
           {
             method: 'POST',
@@ -1099,14 +1956,14 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       {
         id: 'session-messages',
         title: 'Session Messages',
-        description: 'Inspect raw captured conversation rows that were stored during ingest.',
+        description: 'Inspect raw captured conversation rows that were stored during ingest. `appId` uses the same omitted / exact / default-global filtering behavior as memory search.',
         endpoints: [
           {
             method: 'GET',
             path: '/v1alpha2/mem9s/session-messages',
             summary: 'List session messages by session id.',
             description:
-              'Repeat `session_id` in the query string for each session you want to fetch. Use `limit_per_session` to cap rows per session.',
+              'Repeat `session_id` in the query string for each session you want to fetch. Use `limit_per_session` to cap rows per session. If different appIds reused the same session id, pass `appId` to prevent cross-app raw session mixing.',
             headers: hostedReadHeaders,
             queryParams: sessionMessagesQueryParams,
             responseFields: sessionMessagesResponseFields,
@@ -1118,7 +1975,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
         id: 'health',
         title: 'Health & Compatibility',
         description:
-          'Use `/healthz` for liveness checks. Legacy tenant-scoped routes still exist under `/v1alpha1/mem9s/{tenantID}/...`, but hosted clients should prefer `v1alpha2` plus `X-API-Key`.',
+          'Use `/healthz` for liveness checks. Legacy tenant-scoped routes still exist under `/v1alpha1/mem9s/{tenantID}/...`, but most clients should prefer `v1alpha2` plus `X-API-Key`.',
         endpoints: [
           {
             method: 'GET',
@@ -1128,6 +1985,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             responseFields: healthResponseFields,
             examples: [{ label: 'Health check', code: healthCheckCode }],
           },
+          versionEndpoint,
         ],
       },
     ],
@@ -1136,53 +1994,80 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       'If you are onboarding OpenClaw rather than building a direct integration, start from the public SKILL.md. Use the same API key later in Your Memory.',
     ctaLinks: [
       { label: 'SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-      { label: 'Your Memory', href: 'https://mem9.ai/your-memory', external: true },
+      { label: 'Your Memory', href: '/your-memory/', external: true },
       { label: 'GitHub', href: 'https://github.com/mem9-ai/mem9', external: true },
     ],
   },
   zh: {
     meta: {
-      title: 'mem9 API | Hosted API 文档',
-      description: '查看如何创建 API key、读写记忆、上传文件，以及查询 hosted mem9 API 的 session messages。',
+      title: 'mem9 API | API 文档',
+      description: '查看如何创建 API key、读写记忆、使用 appId 隔离子空间、上传文件，以及查询 mem9 API 的 session messages。',
     },
     kicker: 'API',
-    title: 'Hosted mem9 API 文档',
-    intro: '使用 hosted mem9 API 创建 space、写入或搜索记忆、导入已有文件，并查看捕获到的 session messages。',
+    title: 'mem9 API 文档',
+    intro: '使用 mem9 API 创建 space、写入或搜索记忆、通过 appId 隔离同一 API key 下的子空间、导入已有文件，并查看捕获到的 session messages。示例使用 mem9.ai；自托管部署可以使用自己的 base URL 调用同一组路径。',
     summary: '日常调用优先使用 `v1alpha2`。`v1alpha1` 继续保留给 key provision 和 tenant-scoped 兼容路径。',
     labels: {
       headers: '请求头',
       queryParams: '查询参数',
       body: '请求体',
-      response: '响应',
+      response: '响应 Body',
       examples: '示例',
       required: '必填',
       next: '下一步',
       sidebarTitle: '本页目录',
       sidebarAuth: '认证',
       sidebarQuickstart: '快速开始',
+      apiProduct: 'API 产品',
+      webConsole: 'Web Console',
+      yourMemory: 'Your Memory',
+      apiSearch: '搜索 API',
+      apiSearchPlaceholder: '搜索 path 或名称',
+      apiSearchEmpty: '没有匹配的 API。',
+      testApi: '测试 API',
+      testTitle: '测试 API',
+      close: '关闭',
+      closeApiTestModal: '关闭 API 测试弹窗',
+      reset: '重置',
+      run: '运行',
+      baseUrl: 'Base URL',
+      pathParams: '路径参数',
+      jsonBody: 'JSON 请求体',
+      ready: '就绪',
+      responseReady: '运行请求后在这里查看响应。',
+      emptyResponse: '空响应',
+      running: '运行中...',
+      runningRequest: '正在发送请求...',
+      requestFailed: '请求失败',
+      pathParameter: '路径参数。',
+      saveFormInfo: '保存表单信息',
     },
     authTitle: 'Base URL 与认证方式',
     authCards: [
       {
-        title: 'Hosted base URL',
-        body: '使用 `https://api.mem9.ai`。正常客户端请求应发送到 `https://api.mem9.ai/v1alpha2/mem9s/...`。',
+        title: 'Base URL',
+        body: '使用 mem9.ai 时 base URL 是 `https://api.mem9.ai`；自托管时替换成自己的服务地址。runtime memory 接口路径仍是 `/v1alpha2/mem9s/...`。',
       },
       {
-        title: '主认证 header',
-        body: '把 mem9 API key 放进 `X-API-Key`。这是 `v1alpha2` 的默认 hosted 认证模型。',
+        title: 'API key header',
+        body: '`v1alpha2` 调用把 space API key 放在 `X-API-Key`。mem9.ai 可通过 `POST /v1alpha1/mem9s` 创建 key；自托管则使用自己控制面生成的 key。',
       },
       {
-        title: '可选的 agent 身份',
-        body: '当你希望写入或导入归属到某个 agent 时，再额外发送 `X-Mnemo-Agent-Id`。旧的 tenant-scoped 路由仍保留在 `v1alpha1` 下。',
+        title: 'Agent 身份',
+        body: '`X-Mnemo-Agent-Id` 可选，用来标记写入或导入来自哪个 agent；如果请求体同时传了 `agent_id`，以请求体为准。',
+      },
+      {
+        title: 'appId 隔离',
+        body: '`appId` 用来在同一个 API key 下隔离 memory 和 raw session 子空间。不传 `appId` 表示搜索全部子空间；传具体值表示精确隔离；传 `null` 或空值表示 default/global 记忆。',
       },
     ],
     quickstartTitle: 'Quick start',
-    quickstartDescription: '最小 hosted 流程是：先 provision 一个 key，把它导出到 shell，然后创建并搜索记忆。',
+    quickstartDescription: '最小 mem9.ai 流程是：先 provision 一个 key，把它导出到 shell，然后创建并搜索记忆。自托管时保留相同路径，只替换 base URL。',
     quickstartSteps: [
       '通过 `POST /v1alpha1/mem9s` 创建新的 API key。',
       '把该 key 导出成 `API_KEY`，并设置 `API=https://api.mem9.ai/v1alpha2/mem9s`。',
-      '用 `POST /memories` 写入一条记忆。',
-      '再用 `GET /memories?q=...` 搜回来。',
+      '用 `POST /memories` 写入一条记忆；当一个 API key 需要承载多个应用场景时，传入 `appId`。',
+      '再用 `GET /memories?q=...` 搜回来；不传 `appId` 表示跨全部 appId 搜索，传入某个 `appId` 表示只查该子空间。',
     ],
     quickstartExamples: [
       { label: '创建 key', code: provisionKeyCode },
@@ -1194,51 +2079,56 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       {
         id: 'provisioning',
         title: 'Provisioning',
-        description: '创建你后续会重复使用的 hosted mem9 访问 key。',
+        description: '创建你后续会重复使用的 mem9.ai API 访问 key。',
         endpoints: [
           {
             method: 'POST',
             path: '/v1alpha1/mem9s',
             summary: '创建新的 mem9 API key。',
-            description: '不需要认证，也不需要请求体。hosted 服务会返回 `201` 和一个 `id` 字段，这个 `id` 就是你要保存和复用的 key。',
+            description: '不需要认证，也不需要请求体。mem9.ai 服务会返回 `201` 和一个 `id` 字段，这个 `id` 就是你要保存和复用的 key。',
             responseFields: provisionResponseFields,
             examples: [{ label: '创建 key', code: provisionKeyCode }],
           },
         ],
       },
+      keyStatusEndpointGroup,
       {
         id: 'memories',
         title: 'Memories',
-        description: '在你的 mem9 space 中创建、搜索、读取、更新和删除记忆。',
+        description: '在你的 mem9 space 中创建、搜索、读取、更新和删除记忆。可选的 `appId` 让同一个 API key 拥有多个相互隔离的应用子记忆空间。',
         endpoints: [
           {
             method: 'POST',
             path: '/v1alpha2/mem9s/memories',
             summary: '创建记忆或执行 message ingest。',
-            description: '直接写入时使用 `content`；走 ingest 时使用 `messages`。同一个请求里不要同时发送这两个字段。',
+            description: '直接写入时使用 `content`；走 ingest 时使用 `messages`。同一个请求里不要同时发送这两个字段。`appId` 可选；省略、null、空字符串和纯空白都会写入默认/global appId。',
             headers: hostedJSONWriteHeaders,
             bodyFields: memoryCreateBodyFields,
             responseFields: statusOnlyResponseFields,
-            examples: [{ label: '创建记忆', code: createMemoryCode }],
+            examples: [
+              { label: '创建记忆', code: createMemoryCode },
+              { label: 'Smart ingest', code: smartIngestCode },
+            ],
           },
           {
             method: 'GET',
             path: '/v1alpha2/mem9s/memories',
             summary: '列出或搜索记忆。',
-            description: '带 `q` 时走 recall search；不带 `q` 时更像一个带过滤条件的列表接口。',
+            description: '带 `q` 时默认走 recall search；`search_mode=keyword` 用于直接按 content 子串搜索。`appId` 是三态语义：不传表示跨全部 appId 搜索，传非空值表示精确隔离，传 `appId=null` 或 `appId=` 表示只查默认/global appId。',
             headers: hostedReadHeaders,
             queryParams: memoryListQueryParams,
             responseFields: memoryListResponseFields,
             examples: [
               { label: '搜索记忆', code: listMemoryCode },
               { label: '按标签 / source 过滤', code: filterMemoryCode },
+              { label: '直接内容关键词搜索', code: keywordListMemoryCode },
             ],
           },
           {
             method: 'GET',
             path: '/v1alpha2/mem9s/memories/{id}',
             summary: '按 id 读取单条记忆。',
-            description: '从 hosted 服务里拉取一条完整的记忆对象。',
+            description: '从 mem9 API 拉取一条完整的记忆对象。',
             headers: hostedReadHeaders,
             responseFields: memoryObjectResponseFields,
             examples: [{ label: '读取记忆', code: getMemoryCode }],
@@ -1261,12 +2151,15 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedReadHeaders,
             examples: [{ label: '删除记忆', code: deleteMemoryCode }],
           },
+          batchDeleteMemoryEndpoint,
         ],
       },
+      spaceChainEndpointGroup,
+      webhookEndpointGroup,
       {
         id: 'imports',
         title: 'Imports',
-        description: '上传 memory / session 文件，并轮询后台任务状态。',
+        description: '上传 memory / session 文件，并轮询后台任务状态。导入的 memory 和 raw session 可以在文件级、memory 级或 session 级携带 `appId`。',
         endpoints: [
           {
             method: 'POST',
@@ -1304,13 +2197,13 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       {
         id: 'session-messages',
         title: 'Session Messages',
-        description: '查看在 ingest 过程中被保存下来的原始对话消息。',
+        description: '查看在 ingest 过程中被保存下来的原始对话消息。`appId` 使用和 memory 搜索一致的不传 / 精确值 / 默认 global 三态过滤。',
         endpoints: [
           {
             method: 'GET',
             path: '/v1alpha2/mem9s/session-messages',
             summary: '按 session id 读取 session messages。',
-            description: '为每个要查询的 session 重复传 `session_id` 参数；用 `limit_per_session` 控制每个 session 的返回上限。',
+            description: '为每个要查询的 session 重复传 `session_id` 参数；用 `limit_per_session` 控制每个 session 的返回上限。如果不同 appId 复用了同一个 session id，传入 `appId` 可以避免 raw session 串到其它应用。',
             headers: hostedReadHeaders,
             queryParams: sessionMessagesQueryParams,
             responseFields: sessionMessagesResponseFields,
@@ -1321,7 +2214,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       {
         id: 'health',
         title: 'Health 与兼容性',
-        description: '用 `/healthz` 做存活检查。旧的 tenant-scoped 路由仍存在于 `/v1alpha1/mem9s/{tenantID}/...` 下，但 hosted 客户端应优先使用 `v1alpha2` + `X-API-Key`。',
+        description: '用 `/healthz` 做存活检查。旧的 tenant-scoped 路由仍存在于 `/v1alpha1/mem9s/{tenantID}/...` 下，但大多数客户端应优先使用 `v1alpha2` + `X-API-Key`。',
         endpoints: [
           {
             method: 'GET',
@@ -1331,6 +2224,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             responseFields: healthResponseFields,
             examples: [{ label: '健康检查', code: healthCheckCode }],
           },
+          versionEndpoint,
         ],
       },
     ],
@@ -1338,40 +2232,63 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
     ctaBody: '如果你的目标是接入 OpenClaw，而不是自己写一个直接集成，请从公开的 SKILL.md 开始。之后在 Your Memory 中继续使用同一个 API key。',
     ctaLinks: [
       { label: 'SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-      { label: 'Your Memory', href: 'https://mem9.ai/your-memory', external: true },
+      { label: 'Your Memory', href: '/your-memory/', external: true },
       { label: 'GitHub', href: 'https://github.com/mem9-ai/mem9', external: true },
     ],
   },
   'zh-Hant': {
     meta: {
-      title: 'mem9 API | Hosted API 文件',
-      description: '查看如何建立 API key、讀寫記憶、上傳檔案，以及查詢 hosted mem9 API 的 session messages。',
+      title: 'mem9 API | API 文件',
+      description: '查看如何建立 API key、讀寫記憶、上傳檔案，以及查詢 mem9 API 的 session messages。',
     },
     kicker: 'API',
-    title: 'Hosted mem9 API 文件',
-    intro: '使用 hosted mem9 API 建立 space、寫入或搜尋記憶、匯入既有檔案，並查看捕捉到的 session messages。',
+    title: 'mem9 API 文件',
+    intro: '使用 mem9 API 建立 space、寫入或搜尋記憶、匯入既有檔案，並查看捕捉到的 session messages。',
     summary: '日常呼叫優先使用 `v1alpha2`。`v1alpha1` 持續保留給 key provision 與 tenant-scoped 相容路徑。',
     labels: {
       headers: '請求頭',
       queryParams: '查詢參數',
       body: '請求體',
-      response: '回應',
+      response: '回應 Body',
       examples: '範例',
       required: '必填',
       next: '下一步',
       sidebarTitle: '本頁目錄',
       sidebarAuth: '驗證',
       sidebarQuickstart: '快速開始',
+      apiProduct: 'API 產品',
+      webConsole: 'Web Console',
+      yourMemory: 'Your Memory',
+      apiSearch: '搜尋 API',
+      apiSearchPlaceholder: '搜尋 path 或名稱',
+      apiSearchEmpty: '沒有符合的 API。',
+      testApi: '測試 API',
+      testTitle: '測試 API',
+      close: '關閉',
+      closeApiTestModal: '關閉 API 測試彈窗',
+      reset: '重設',
+      run: '執行',
+      baseUrl: 'Base URL',
+      pathParams: '路徑參數',
+      jsonBody: 'JSON 請求體',
+      ready: '就緒',
+      responseReady: '執行請求後在這裡查看回應。',
+      emptyResponse: '空回應',
+      running: '執行中...',
+      runningRequest: '正在送出請求...',
+      requestFailed: '請求失敗',
+      pathParameter: '路徑參數。',
+      saveFormInfo: '儲存表單資訊',
     },
     authTitle: 'Base URL 與驗證方式',
     authCards: [
       {
-        title: 'Hosted base URL',
+        title: 'Base URL',
         body: '使用 `https://api.mem9.ai`。一般客戶端請求應發送到 `https://api.mem9.ai/v1alpha2/mem9s/...`。',
       },
       {
         title: '主要驗證 header',
-        body: '把 mem9 API key 放進 `X-API-Key`。這是 `v1alpha2` 的預設 hosted 驗證模式。',
+        body: '把 mem9 API key 放進 `X-API-Key`。這是 `v1alpha2` 的預設驗證模式。',
       },
       {
         title: '可選 agent 身分',
@@ -1379,7 +2296,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       },
     ],
     quickstartTitle: 'Quick start',
-    quickstartDescription: '最小 hosted 流程是：先 provision 一個 key，把它 export 到 shell，然後建立並搜尋記憶。',
+    quickstartDescription: '最小 mem9.ai 流程是：先 provision 一個 key，把它 export 到 shell，然後建立並搜尋記憶。',
     quickstartSteps: [
       '透過 `POST /v1alpha1/mem9s` 建立新的 API key。',
       '把該 key export 成 `API_KEY`，並設定 `API=https://api.mem9.ai/v1alpha2/mem9s`。',
@@ -1408,6 +2325,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
           },
         ],
       },
+      keyStatusEndpointGroup,
       {
         id: 'memories',
         title: 'Memories',
@@ -1421,7 +2339,10 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedJSONWriteHeaders,
             bodyFields: memoryCreateBodyFields,
             responseFields: statusOnlyResponseFields,
-            examples: [{ label: '建立記憶', code: createMemoryCode }],
+            examples: [
+              { label: '建立記憶', code: createMemoryCode },
+              { label: 'Smart ingest', code: smartIngestCode },
+            ],
           },
           {
             method: 'GET',
@@ -1463,8 +2384,11 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedReadHeaders,
             examples: [{ label: '刪除記憶', code: deleteMemoryCode }],
           },
+          batchDeleteMemoryEndpoint,
         ],
       },
+      spaceChainEndpointGroup,
+      webhookEndpointGroup,
       {
         id: 'imports',
         title: 'Imports',
@@ -1533,6 +2457,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             responseFields: healthResponseFields,
             examples: [{ label: '健康檢查', code: healthCheckCode }],
           },
+          versionEndpoint,
         ],
       },
     ],
@@ -1540,40 +2465,63 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
     ctaBody: '如果你的目標是接入 OpenClaw，而不是自己實作直接整合，請先從公開的 SKILL.md 開始。之後在 Your Memory 繼續使用同一個 API key。',
     ctaLinks: [
       { label: 'SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-      { label: 'Your Memory', href: 'https://mem9.ai/your-memory', external: true },
+      { label: 'Your Memory', href: '/your-memory/', external: true },
       { label: 'GitHub', href: 'https://github.com/mem9-ai/mem9', external: true },
     ],
   },
   ja: {
     meta: {
-      title: 'mem9 API | Hosted API リファレンス',
+      title: 'mem9 API | API リファレンス',
       description: 'API key の発行、memory の読み書き、ファイル import、session messages の取得方法を確認できます。',
     },
     kicker: 'API',
-    title: 'Hosted mem9 API リファレンス',
-    intro: 'hosted mem9 API を使って space を発行し、memory を書き込み / 検索し、既存ファイルを import し、保存済み session messages を確認できます。',
+    title: 'mem9 API リファレンス',
+    intro: 'mem9 API を使って space を発行し、memory を書き込み / 検索し、既存ファイルを import し、保存済み session messages を確認できます。',
     summary: '日常利用では `v1alpha2` を優先してください。`v1alpha1` は key の provision と tenant-scoped な互換ルート向けに残っています。',
     labels: {
       headers: 'Headers',
       queryParams: 'Query Params',
       body: 'Body',
-      response: 'Response',
+      response: 'Response Body',
       examples: 'Examples',
       required: '必須',
       next: 'Next',
       sidebarTitle: 'このページの内容',
       sidebarAuth: '認証',
       sidebarQuickstart: 'クイックスタート',
+      apiProduct: 'API 製品',
+      webConsole: 'Web Console',
+      yourMemory: 'Your Memory',
+      apiSearch: 'API を検索',
+      apiSearchPlaceholder: 'path または名前を検索',
+      apiSearchEmpty: '一致する API はありません。',
+      testApi: 'API をテスト',
+      testTitle: 'API をテスト',
+      close: '閉じる',
+      closeApiTestModal: 'API テストモーダルを閉じる',
+      reset: 'リセット',
+      run: '実行',
+      baseUrl: 'Base URL',
+      pathParams: 'パスパラメータ',
+      jsonBody: 'JSON body',
+      ready: '準備完了',
+      responseReady: 'リクエストを実行するとレスポンスを確認できます。',
+      emptyResponse: '空のレスポンス',
+      running: '実行中...',
+      runningRequest: 'リクエストを実行中...',
+      requestFailed: 'リクエストに失敗しました',
+      pathParameter: 'パスパラメータ。',
+      saveFormInfo: 'フォーム情報を保存',
     },
     authTitle: 'Base URL と認証',
     authCards: [
       {
-        title: 'Hosted base URL',
+        title: 'Base URL',
         body: '`https://api.mem9.ai` を使います。通常のクライアント通信は `https://api.mem9.ai/v1alpha2/mem9s/...` に送ってください。',
       },
       {
         title: '主要な認証 header',
-        body: 'mem9 API key は `X-API-Key` に送ります。これが `v1alpha2` の標準的な hosted 認証です。',
+        body: 'mem9 API key は `X-API-Key` に送ります。これが `v1alpha2` の標準的な認証です。',
       },
       {
         title: '任意の agent identity',
@@ -1581,7 +2529,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       },
     ],
     quickstartTitle: 'Quick start',
-    quickstartDescription: '最小の hosted フローは、key を provision して shell に export し、その後 memory を作成して検索することです。',
+    quickstartDescription: '最小の mem9.ai フローは、key を provision して shell に export し、その後 memory を作成して検索することです。',
     quickstartSteps: [
       '`POST /v1alpha1/mem9s` で新しい API key を作成する。',
       'その key を `API_KEY` として export し、`API=https://api.mem9.ai/v1alpha2/mem9s` を設定する。',
@@ -1604,12 +2552,13 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             method: 'POST',
             path: '/v1alpha1/mem9s',
             summary: '新しい mem9 API key を発行する。',
-            description: '認証も request body も不要です。hosted service は `201` と `id` を返し、その `id` が保存して再利用する key になります。',
+            description: '認証も request body も不要です。service は `201` と `id` を返し、その `id` が保存して再利用する key になります。',
             responseFields: provisionResponseFields,
             examples: [{ label: 'Key を発行', code: provisionKeyCode }],
           },
         ],
       },
+      keyStatusEndpointGroup,
       {
         id: 'memories',
         title: 'Memories',
@@ -1623,7 +2572,10 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedJSONWriteHeaders,
             bodyFields: memoryCreateBodyFields,
             responseFields: statusOnlyResponseFields,
-            examples: [{ label: 'Memory を作成', code: createMemoryCode }],
+            examples: [
+              { label: 'Memory を作成', code: createMemoryCode },
+              { label: 'Smart ingest', code: smartIngestCode },
+            ],
           },
           {
             method: 'GET',
@@ -1642,7 +2594,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             method: 'GET',
             path: '/v1alpha2/mem9s/memories/{id}',
             summary: 'id で 1 件の memory を取得する。',
-            description: 'hosted service から単一の memory object を取得します。',
+            description: 'mem9 API から単一の memory object を取得します。',
             headers: hostedReadHeaders,
             responseFields: memoryObjectResponseFields,
             examples: [{ label: 'Memory を取得', code: getMemoryCode }],
@@ -1665,8 +2617,11 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedReadHeaders,
             examples: [{ label: 'Memory を削除', code: deleteMemoryCode }],
           },
+          batchDeleteMemoryEndpoint,
         ],
       },
+      spaceChainEndpointGroup,
+      webhookEndpointGroup,
       {
         id: 'imports',
         title: 'Imports',
@@ -1735,6 +2690,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             responseFields: healthResponseFields,
             examples: [{ label: 'Health check', code: healthCheckCode }],
           },
+          versionEndpoint,
         ],
       },
     ],
@@ -1742,40 +2698,63 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
     ctaBody: '直接 integration を作るのではなく OpenClaw をつなぎたいなら、まず公開 SKILL.md から始めてください。その後、同じ API key を Your Memory でも使えます。',
     ctaLinks: [
       { label: 'SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-      { label: 'Your Memory', href: 'https://mem9.ai/your-memory', external: true },
+      { label: 'Your Memory', href: '/your-memory/', external: true },
       { label: 'GitHub', href: 'https://github.com/mem9-ai/mem9', external: true },
     ],
   },
   ko: {
     meta: {
-      title: 'mem9 API | Hosted API 레퍼런스',
+      title: 'mem9 API | API 레퍼런스',
       description: 'API key 발급, memory 읽기/쓰기, 파일 import, session messages 조회 방법을 확인할 수 있습니다.',
     },
     kicker: 'API',
-    title: 'Hosted mem9 API 레퍼런스',
-    intro: 'hosted mem9 API 로 space 를 만들고, memory 를 쓰고 검색하고, 기존 파일을 import 하고, 저장된 session messages 를 확인할 수 있습니다.',
+    title: 'mem9 API 레퍼런스',
+    intro: 'mem9 API 로 space 를 만들고, memory 를 쓰고 검색하고, 기존 파일을 import 하고, 저장된 session messages 를 확인할 수 있습니다.',
     summary: '일상적인 사용은 `v1alpha2` 를 우선하세요. `v1alpha1` 은 key provision 과 tenant-scoped 호환 경로를 위해 남아 있습니다.',
     labels: {
       headers: 'Headers',
       queryParams: 'Query Params',
       body: 'Body',
-      response: 'Response',
+      response: 'Response Body',
       examples: 'Examples',
       required: '필수',
       next: '다음',
       sidebarTitle: '이 페이지 목차',
       sidebarAuth: '인증',
       sidebarQuickstart: '빠른 시작',
+      apiProduct: 'API 제품',
+      webConsole: 'Web Console',
+      yourMemory: 'Your Memory',
+      apiSearch: 'API 검색',
+      apiSearchPlaceholder: 'path 또는 이름 검색',
+      apiSearchEmpty: '일치하는 API가 없습니다.',
+      testApi: 'API 테스트',
+      testTitle: 'API 테스트',
+      close: '닫기',
+      closeApiTestModal: 'API 테스트 모달 닫기',
+      reset: '초기화',
+      run: '실행',
+      baseUrl: 'Base URL',
+      pathParams: '경로 파라미터',
+      jsonBody: 'JSON body',
+      ready: '준비됨',
+      responseReady: '요청을 실행하면 응답을 확인할 수 있습니다.',
+      emptyResponse: '빈 응답',
+      running: '실행 중...',
+      runningRequest: '요청 실행 중...',
+      requestFailed: '요청 실패',
+      pathParameter: '경로 파라미터.',
+      saveFormInfo: '폼 정보 저장',
     },
     authTitle: 'Base URL 과 인증',
     authCards: [
       {
-        title: 'Hosted base URL',
+        title: 'Base URL',
         body: '`https://api.mem9.ai` 를 사용합니다. 일반적인 클라이언트 트래픽은 `https://api.mem9.ai/v1alpha2/mem9s/...` 로 보내세요.',
       },
       {
         title: '기본 인증 header',
-        body: 'mem9 API key 는 `X-API-Key` 로 보냅니다. 이것이 `v1alpha2` 의 기본 hosted 인증 방식입니다.',
+        body: 'mem9 API key 는 `X-API-Key` 로 보냅니다. 이것이 `v1alpha2` 의 기본 인증 방식입니다.',
       },
       {
         title: '선택적 agent identity',
@@ -1783,7 +2762,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       },
     ],
     quickstartTitle: 'Quick start',
-    quickstartDescription: '가장 작은 hosted 흐름은 key 를 provision 하고 shell 에 export 한 뒤, memory 를 생성하고 검색하는 것입니다.',
+    quickstartDescription: '가장 작은 mem9.ai 흐름은 key 를 provision 하고 shell 에 export 한 뒤, memory 를 생성하고 검색하는 것입니다.',
     quickstartSteps: [
       '`POST /v1alpha1/mem9s` 로 새 API key 를 만든다.',
       '그 key 를 `API_KEY` 로 export 하고 `API=https://api.mem9.ai/v1alpha2/mem9s` 를 설정한다.',
@@ -1806,12 +2785,13 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             method: 'POST',
             path: '/v1alpha1/mem9s',
             summary: '새 mem9 API key 를 발급합니다.',
-            description: '인증도 request body 도 필요 없습니다. hosted service 는 `201` 과 `id` 를 반환하며, 이 `id` 가 저장하고 재사용할 key 입니다.',
+            description: '인증도 request body 도 필요 없습니다. service 는 `201` 과 `id` 를 반환하며, 이 `id` 가 저장하고 재사용할 key 입니다.',
             responseFields: provisionResponseFields,
             examples: [{ label: 'Key 발급', code: provisionKeyCode }],
           },
         ],
       },
+      keyStatusEndpointGroup,
       {
         id: 'memories',
         title: 'Memories',
@@ -1825,7 +2805,10 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedJSONWriteHeaders,
             bodyFields: memoryCreateBodyFields,
             responseFields: statusOnlyResponseFields,
-            examples: [{ label: 'Memory 생성', code: createMemoryCode }],
+            examples: [
+              { label: 'Memory 생성', code: createMemoryCode },
+              { label: 'Smart ingest', code: smartIngestCode },
+            ],
           },
           {
             method: 'GET',
@@ -1844,7 +2827,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             method: 'GET',
             path: '/v1alpha2/mem9s/memories/{id}',
             summary: 'id 로 단일 memory 를 조회합니다.',
-            description: 'hosted service 에서 하나의 memory object 를 가져옵니다.',
+            description: 'mem9 API 에서 하나의 memory object 를 가져옵니다.',
             headers: hostedReadHeaders,
             responseFields: memoryObjectResponseFields,
             examples: [{ label: 'Memory 조회', code: getMemoryCode }],
@@ -1867,8 +2850,11 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedReadHeaders,
             examples: [{ label: 'Memory 삭제', code: deleteMemoryCode }],
           },
+          batchDeleteMemoryEndpoint,
         ],
       },
+      spaceChainEndpointGroup,
+      webhookEndpointGroup,
       {
         id: 'imports',
         title: 'Imports',
@@ -1937,6 +2923,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             responseFields: healthResponseFields,
             examples: [{ label: 'Health check', code: healthCheckCode }],
           },
+          versionEndpoint,
         ],
       },
     ],
@@ -1944,40 +2931,63 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
     ctaBody: '직접 integration 을 만드는 것이 아니라 OpenClaw 를 연결하려는 목적이라면 공개 SKILL.md 부터 시작하세요. 이후 같은 API key 를 Your Memory 에서도 사용할 수 있습니다.',
     ctaLinks: [
       { label: 'SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-      { label: 'Your Memory', href: 'https://mem9.ai/your-memory', external: true },
+      { label: 'Your Memory', href: '/your-memory/', external: true },
       { label: 'GitHub', href: 'https://github.com/mem9-ai/mem9', external: true },
     ],
   },
   id: {
     meta: {
-      title: 'mem9 API | Referensi Hosted API',
-      description: 'Pelajari cara membuat API key, membaca dan menulis memory, mengimpor file, dan membaca session messages di hosted mem9 API.',
+      title: 'mem9 API | Referensi API',
+      description: 'Pelajari cara membuat API key, membaca dan menulis memory, mengimpor file, dan membaca session messages di mem9 API.',
     },
     kicker: 'API',
-    title: 'Referensi hosted mem9 API',
-    intro: 'Gunakan hosted mem9 API untuk membuat space, menulis atau mencari memory, mengimpor file yang sudah ada, dan melihat session messages yang tersimpan.',
+    title: 'Referensi mem9 API',
+    intro: 'Gunakan mem9 API untuk membuat space, menulis atau mencari memory, mengimpor file yang sudah ada, dan melihat session messages yang tersimpan.',
     summary: 'Gunakan `v1alpha2` untuk pemakaian harian. `v1alpha1` tetap tersedia untuk provision key dan kompatibilitas tenant-scoped.',
     labels: {
       headers: 'Headers',
       queryParams: 'Query Params',
       body: 'Body',
-      response: 'Response',
+      response: 'Response Body',
       examples: 'Examples',
       required: 'Wajib',
       next: 'Next',
       sidebarTitle: 'Di halaman ini',
       sidebarAuth: 'Autentikasi',
       sidebarQuickstart: 'Quick Start',
+      apiProduct: 'Produk API',
+      webConsole: 'Web Console',
+      yourMemory: 'Your Memory',
+      apiSearch: 'Cari API',
+      apiSearchPlaceholder: 'Cari path atau nama',
+      apiSearchEmpty: 'Tidak ada API yang cocok.',
+      testApi: 'Uji API',
+      testTitle: 'Uji API',
+      close: 'Tutup',
+      closeApiTestModal: 'Tutup modal uji API',
+      reset: 'Reset',
+      run: 'Jalankan',
+      baseUrl: 'Base URL',
+      pathParams: 'Parameter path',
+      jsonBody: 'Body JSON',
+      ready: 'Siap',
+      responseReady: 'Jalankan request untuk melihat respons.',
+      emptyResponse: 'respons kosong',
+      running: 'Menjalankan...',
+      runningRequest: 'Menjalankan request...',
+      requestFailed: 'Request gagal',
+      pathParameter: 'Parameter path.',
+      saveFormInfo: 'Simpan info formulir',
     },
     authTitle: 'Base URL & autentikasi',
     authCards: [
       {
-        title: 'Hosted base URL',
+        title: 'Base URL',
         body: 'Gunakan `https://api.mem9.ai`. Untuk trafik client normal, kirim request ke `https://api.mem9.ai/v1alpha2/mem9s/...`.',
       },
       {
         title: 'Header autentikasi utama',
-        body: 'Kirim mem9 API key Anda di `X-API-Key`. Ini adalah model auth hosted default untuk `v1alpha2`.',
+        body: 'Kirim mem9 API key Anda di `X-API-Key`. Ini adalah model auth default untuk `v1alpha2`.',
       },
       {
         title: 'Identitas agent opsional',
@@ -1985,7 +2995,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       },
     ],
     quickstartTitle: 'Quick start',
-    quickstartDescription: 'Alur hosted paling kecil adalah: provision key, export ke shell, lalu buat dan cari memory.',
+    quickstartDescription: 'Alur mem9.ai paling kecil adalah: provision key, export ke shell, lalu buat dan cari memory.',
     quickstartSteps: [
       'Provision API key baru dengan `POST /v1alpha1/mem9s`.',
       'Export key itu sebagai `API_KEY`, lalu set `API=https://api.mem9.ai/v1alpha2/mem9s`.',
@@ -2014,6 +3024,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
           },
         ],
       },
+      keyStatusEndpointGroup,
       {
         id: 'memories',
         title: 'Memories',
@@ -2027,7 +3038,10 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedJSONWriteHeaders,
             bodyFields: memoryCreateBodyFields,
             responseFields: statusOnlyResponseFields,
-            examples: [{ label: 'Buat memory', code: createMemoryCode }],
+            examples: [
+              { label: 'Buat memory', code: createMemoryCode },
+              { label: 'Smart ingest', code: smartIngestCode },
+            ],
           },
           {
             method: 'GET',
@@ -2046,7 +3060,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             method: 'GET',
             path: '/v1alpha2/mem9s/memories/{id}',
             summary: 'Baca satu memory berdasarkan id.',
-            description: 'Ambil satu memory object dari hosted service.',
+            description: 'Ambil satu memory object dari mem9 API.',
             headers: hostedReadHeaders,
             responseFields: memoryObjectResponseFields,
             examples: [{ label: 'Ambil memory', code: getMemoryCode }],
@@ -2069,8 +3083,11 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedReadHeaders,
             examples: [{ label: 'Hapus memory', code: deleteMemoryCode }],
           },
+          batchDeleteMemoryEndpoint,
         ],
       },
+      spaceChainEndpointGroup,
+      webhookEndpointGroup,
       {
         id: 'imports',
         title: 'Imports',
@@ -2139,6 +3156,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             responseFields: healthResponseFields,
             examples: [{ label: 'Health check', code: healthCheckCode }],
           },
+          versionEndpoint,
         ],
       },
     ],
@@ -2146,40 +3164,63 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
     ctaBody: 'Jika Anda sedang onboarding OpenClaw dan bukan membangun integrasi langsung, mulai dari SKILL.md publik. Gunakan API key yang sama nanti di Your Memory.',
     ctaLinks: [
       { label: 'SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-      { label: 'Your Memory', href: 'https://mem9.ai/your-memory', external: true },
+      { label: 'Your Memory', href: '/your-memory/', external: true },
       { label: 'GitHub', href: 'https://github.com/mem9-ai/mem9', external: true },
     ],
   },
   th: {
     meta: {
-      title: 'mem9 API | เอกสาร Hosted API',
-      description: 'ดูวิธีสร้าง API key อ่านและเขียน memory อัปโหลดไฟล์ และอ่าน session messages บน hosted mem9 API',
+      title: 'mem9 API | เอกสาร API',
+      description: 'ดูวิธีสร้าง API key อ่านและเขียน memory อัปโหลดไฟล์ และอ่าน session messages บน mem9 API',
     },
     kicker: 'API',
-    title: 'เอกสาร hosted mem9 API',
-    intro: 'ใช้ hosted mem9 API เพื่อสร้าง space เขียนหรือค้นหา memory นำเข้าไฟล์เดิม และดู session messages ที่ถูกเก็บไว้',
+    title: 'เอกสาร mem9 API',
+    intro: 'ใช้ mem9 API เพื่อสร้าง space เขียนหรือค้นหา memory นำเข้าไฟล์เดิม และดู session messages ที่ถูกเก็บไว้',
     summary: 'สำหรับการใช้งานประจำวันให้ใช้ `v1alpha2` เป็นหลัก ส่วน `v1alpha1` ยังมีไว้สำหรับ provision key และเส้นทาง tenant-scoped แบบเดิม',
     labels: {
       headers: 'Headers',
       queryParams: 'Query Params',
       body: 'Body',
-      response: 'Response',
+      response: 'Response Body',
       examples: 'Examples',
       required: 'จำเป็น',
       next: 'ถัดไป',
       sidebarTitle: 'ในหน้านี้',
       sidebarAuth: 'การยืนยันตัวตน',
       sidebarQuickstart: 'เริ่มต้นอย่างรวดเร็ว',
+      apiProduct: 'ผลิตภัณฑ์ API',
+      webConsole: 'Web Console',
+      yourMemory: 'Your Memory',
+      apiSearch: 'ค้นหา API',
+      apiSearchPlaceholder: 'ค้นหา path หรือชื่อ',
+      apiSearchEmpty: 'ไม่พบ API ที่ตรงกัน',
+      testApi: 'ทดสอบ API',
+      testTitle: 'ทดสอบ API',
+      close: 'ปิด',
+      closeApiTestModal: 'ปิดหน้าต่างทดสอบ API',
+      reset: 'รีเซ็ต',
+      run: 'เรียกใช้',
+      baseUrl: 'Base URL',
+      pathParams: 'พารามิเตอร์ path',
+      jsonBody: 'JSON body',
+      ready: 'พร้อม',
+      responseReady: 'เรียกใช้ request เพื่อดู response',
+      emptyResponse: 'response ว่าง',
+      running: 'กำลังเรียกใช้...',
+      runningRequest: 'กำลังส่ง request...',
+      requestFailed: 'Request ล้มเหลว',
+      pathParameter: 'พารามิเตอร์ path',
+      saveFormInfo: 'บันทึกข้อมูลฟอร์ม',
     },
     authTitle: 'Base URL และการยืนยันตัวตน',
     authCards: [
       {
-        title: 'Hosted base URL',
+        title: 'Base URL',
         body: 'ใช้ `https://api.mem9.ai` สำหรับ client ปกติให้ส่ง request ไปที่ `https://api.mem9.ai/v1alpha2/mem9s/...`',
       },
       {
         title: 'Header สำหรับ auth หลัก',
-        body: 'ส่ง mem9 API key ของคุณใน `X-API-Key` นี่คือรูปแบบ auth หลักของ hosted `v1alpha2`',
+        body: 'ส่ง mem9 API key ของคุณใน `X-API-Key` นี่คือรูปแบบ auth หลักของ `v1alpha2`',
       },
       {
         title: 'Agent identity แบบเลือกได้',
@@ -2187,7 +3228,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
       },
     ],
     quickstartTitle: 'Quick start',
-    quickstartDescription: 'ลำดับ hosted ที่เล็กที่สุดคือ provision key, export เข้า shell แล้วสร้างและค้นหา memory',
+    quickstartDescription: 'ลำดับ mem9.ai ที่เล็กที่สุดคือ provision key, export เข้า shell แล้วสร้างและค้นหา memory',
     quickstartSteps: [
       'สร้าง API key ใหม่ด้วย `POST /v1alpha1/mem9s`',
       'export key นั้นเป็น `API_KEY` และตั้ง `API=https://api.mem9.ai/v1alpha2/mem9s`',
@@ -2216,6 +3257,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
           },
         ],
       },
+      keyStatusEndpointGroup,
       {
         id: 'memories',
         title: 'Memories',
@@ -2229,7 +3271,10 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedJSONWriteHeaders,
             bodyFields: memoryCreateBodyFields,
             responseFields: statusOnlyResponseFields,
-            examples: [{ label: 'สร้าง memory', code: createMemoryCode }],
+            examples: [
+              { label: 'สร้าง memory', code: createMemoryCode },
+              { label: 'Smart ingest', code: smartIngestCode },
+            ],
           },
           {
             method: 'GET',
@@ -2248,7 +3293,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             method: 'GET',
             path: '/v1alpha2/mem9s/memories/{id}',
             summary: 'อ่าน memory เดียวตาม id',
-            description: 'ดึง memory object เดียวจาก hosted service',
+            description: 'ดึง memory object เดียวจาก mem9 API',
             headers: hostedReadHeaders,
             responseFields: memoryObjectResponseFields,
             examples: [{ label: 'อ่าน memory', code: getMemoryCode }],
@@ -2271,8 +3316,11 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             headers: hostedReadHeaders,
             examples: [{ label: 'ลบ memory', code: deleteMemoryCode }],
           },
+          batchDeleteMemoryEndpoint,
         ],
       },
+      spaceChainEndpointGroup,
+      webhookEndpointGroup,
       {
         id: 'imports',
         title: 'Imports',
@@ -2341,6 +3389,7 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
             responseFields: healthResponseFields,
             examples: [{ label: 'Health check', code: healthCheckCode }],
           },
+          versionEndpoint,
         ],
       },
     ],
@@ -2348,18 +3397,2907 @@ const apiPageByLocale: Record<SiteLocale, SiteApiPageCopy> = {
     ctaBody: 'ถ้าคุณกำลัง onboarding OpenClaw มากกว่าการสร้าง integration โดยตรง ให้เริ่มจาก SKILL.md สาธารณะ แล้วใช้ API key เดียวกันต่อใน Your Memory',
     ctaLinks: [
       { label: 'SKILL.md', href: 'https://mem9.ai/SKILL.md', external: true },
-      { label: 'Your Memory', href: 'https://mem9.ai/your-memory', external: true },
+      { label: 'Your Memory', href: '/your-memory/', external: true },
       { label: 'GitHub', href: 'https://github.com/mem9-ai/mem9', external: true },
     ],
   },
 };
 
+const releaseNoteSourceGroups: SiteReleaseNoteSource[][][] = [
+  [
+    [
+      { label: 'mem9 issue #347', href: 'https://github.com/mem9-ai/mem9/issues/347' },
+    ],
+    [
+      { label: 'mem9 feat/app-id', href: 'https://github.com/mem9-ai/mem9/tree/feat/app-id' },
+      { label: 'console-fe feat/app-id', href: 'https://github.com/mem9-ai/mem9-console-fe/tree/feat/app-id' },
+      { label: 'console-server feat/app-id', href: 'https://github.com/mem9-ai/mem9-console-server/tree/feat/app-id' },
+    ],
+    [
+      { label: 'mem9 4494822', href: 'https://github.com/mem9-ai/mem9/commit/4494822' },
+      { label: 'mem9 d9cc02a', href: 'https://github.com/mem9-ai/mem9/commit/d9cc02a' },
+      { label: 'mem9 cbd9b16', href: 'https://github.com/mem9-ai/mem9/commit/cbd9b16' },
+    ],
+    [
+      { label: 'console-server #72', href: 'https://github.com/mem9-ai/mem9-console-server/pull/72' },
+      { label: 'console-server #64', href: 'https://github.com/mem9-ai/mem9-console-server/pull/64' },
+      { label: 'console-fe #52', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/52' },
+    ],
+    [
+      { label: 'console-fe #53', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/53' },
+      { label: 'console-fe #34', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/34' },
+      { label: 'console-fe #28', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/28' },
+    ],
+    [
+      { label: 'mem9 #337', href: 'https://github.com/mem9-ai/mem9/pull/337' },
+      { label: 'console-server #61', href: 'https://github.com/mem9-ai/mem9-console-server/pull/61' },
+      { label: 'console-fe #56', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/56' },
+    ],
+    [
+      { label: 'mem9 #338', href: 'https://github.com/mem9-ai/mem9/pull/338' },
+      { label: 'console-fe #57', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/57' },
+    ],
+  ],
+  [
+    [
+      { label: 'mem9 #335', href: 'https://github.com/mem9-ai/mem9/pull/335' },
+      { label: 'mem9 #326', href: 'https://github.com/mem9-ai/mem9/pull/326' },
+      { label: 'console-fe #51', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/51' },
+    ],
+    [
+      { label: 'mem9 #327', href: 'https://github.com/mem9-ai/mem9/pull/327' },
+      { label: 'mem9 #332', href: 'https://github.com/mem9-ai/mem9/pull/332' },
+      { label: 'console-server #56', href: 'https://github.com/mem9-ai/mem9-console-server/pull/56' },
+      { label: 'console-fe #47', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/47' },
+    ],
+    [
+      { label: 'console-fe #49', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/49' },
+    ],
+    [
+      { label: 'mem9 #309', href: 'https://github.com/mem9-ai/mem9/pull/309' },
+      { label: 'console-server #30', href: 'https://github.com/mem9-ai/mem9-console-server/pull/30' },
+      { label: 'console-server #31', href: 'https://github.com/mem9-ai/mem9-console-server/pull/31' },
+      { label: 'console-server #33', href: 'https://github.com/mem9-ai/mem9-console-server/pull/33' },
+      { label: 'console-fe #28', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/28' },
+    ],
+    [
+      { label: 'console-server #32', href: 'https://github.com/mem9-ai/mem9-console-server/pull/32' },
+      { label: 'console-server #35', href: 'https://github.com/mem9-ai/mem9-console-server/pull/35' },
+      { label: 'console-server #37', href: 'https://github.com/mem9-ai/mem9-console-server/pull/37' },
+      { label: 'console-fe #29', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/29' },
+    ],
+    [
+      { label: 'mem9 #308', href: 'https://github.com/mem9-ai/mem9/pull/308' },
+      { label: 'console-server #37', href: 'https://github.com/mem9-ai/mem9-console-server/pull/37' },
+      { label: 'console-fe #29', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/29' },
+    ],
+    [
+      { label: 'console-server #28', href: 'https://github.com/mem9-ai/mem9-console-server/pull/28' },
+      { label: 'console-server #27', href: 'https://github.com/mem9-ai/mem9-console-server/pull/27' },
+    ],
+  ],
+];
+
+const defaultReleaseNoteVersion = 'v1.0.0';
+
+function attachReleaseNoteSources(copy: SiteReleaseNotesPageDraft): SiteReleaseNotesPageCopy {
+  return {
+    ...copy,
+    groups: copy.groups.map((group, groupIndex) => ({
+      ...group,
+      items: group.items.map((item, itemIndex) => ({
+        ...item,
+        version: item.version ?? defaultReleaseNoteVersion,
+        sources: releaseNoteSourceGroups[groupIndex]?.[itemIndex] ?? [],
+      })),
+    })),
+  };
+}
+
+const releaseNotesPageCopyEn = attachReleaseNoteSources({
+    meta: {
+      title: 'Release Notes | mem9',
+      description:
+        'Customer-facing mem9 release notes covering new console, API, Space Chain, billing, and memory management features.',
+    },
+    kicker: 'Release Notes',
+    title: 'What is new in mem9',
+    intro: 'Recent important updates from the mem9 authors.',
+    heroImageAlt: 'mem9 release notes illustration with a memory chip and golden data streams',
+    starPrompt: 'Open source is not easy. Please support us by starring mem9 on GitHub.',
+    starBadgeAlt: 'GitHub stars for mem9-ai/mem9',
+    starBadgeSrc: 'https://img.shields.io/github/stars/mem9-ai/mem9?style=social',
+    starHref: 'https://github.com/mem9-ai/mem9',
+    updatedLabel: 'Last updated',
+    updatedValue: 'June 4, 2026',
+    sourcesLabel: 'PR sources',
+    sourcesFeedback: 'You are welcome to open the PRs or issues and share your feedback.',
+    groups: [
+    {
+      period: 'June 2026',
+      items: [
+        {
+          date: 'June 4, 2026',
+          title: 'Major performance update for mem9.ai',
+          summary:
+            'The official mem9.ai service is receiving an important performance update. Because of early deployment choices, parts of the service and database were running across regions, which added unnecessary latency. We are migrating data in two phases to bring API latency down substantially.',
+          sections: [
+            {
+              title: 'Rollout',
+              items: [
+                'Phase 1 was released at noon Beijing time on June 4 and reduced typical API latency from about 4-6 seconds on average to about 1.3 seconds.',
+                'Phase 2 is expected to finish later this week and migrates metadata, with the goal of bringing average latency down to within a few hundred milliseconds.',
+              ],
+            },
+            {
+              title: 'Feedback',
+              body: 'No client-side change is required. This update improves the hosted mem9.ai service path, and feedback on official service performance is welcome.',
+            },
+          ],
+        },
+        {
+          date: 'June 4, 2026',
+          title: 'appId isolation under one API key',
+          summary:
+            'A single mem9 API key can now hold multiple isolated application memory spaces with `appId`. Memories and raw sessions written with an appId stay associated with that app, so different products, agents, environments, or workflows can share the same key without mixing their day-to-day memory.',
+          sections: [
+            {
+              title: 'How appId scopes memory',
+              items: [
+                'When writing memory or ingesting messages, send `appId`, for example `appId: "docs"` or `appId: "support-bot"`.',
+                'When searching, omit `appId` to search across all appIds under the key, pass a non-empty appId to search one sub-space, or pass `appId=null` / `appId=` to search only default global memory.',
+                'In Console, use the appId filter, appId column, and memory creation appId field to inspect or write memories for a specific application.',
+              ],
+            },
+          ],
+        },
+        {
+          date: 'June 4, 2026',
+          title: 'API reference refresh with live API testing',
+          summary:
+            'The mem9 API reference has been refreshed with a clearer layout, updated endpoint content, and a built-in API test console. Developers can now read the docs and try requests from the same page instead of switching between documentation and separate tooling.',
+          sections: [
+            {
+              title: 'What changed',
+              items: [
+                'The API page now has a clearer sidebar and endpoint layout.',
+                'The documentation content was updated for authentication, appId isolation, memory APIs, imports, session messages, and Space Chain APIs.',
+              ],
+            },
+            {
+              title: 'Where to try it',
+              body: 'Open the API page and use the API test panel to set the base URL, API key, headers, path/query/body fields, run a request, and inspect the response directly in the documentation page.',
+            },
+          ],
+        },
+        {
+          date: 'June 3, 2026',
+          title: 'Import an existing mem9 API key into Console',
+          summary:
+            'Users who already received a mem9 API key from an agent setup or API flow can now attach that key to a Console Space. The Console keeps raw key material protected, shows masked key details, and moves claimed keys into the organization quota model.',
+          sections: [
+            {
+              title: 'Claim flow',
+              items: [
+                'Open the Console claim flow from the setup link, or go directly to `/console/claim`.',
+                'Paste the existing key, choose an organization and project, then bind it to an empty Space or create a new Space during the flow.',
+                'After binding, manage the Space from Console without exposing the raw key in normal views.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'console-server #72', href: 'https://github.com/mem9-ai/mem9-console-server/pull/72' },
+            { label: 'console-server #64', href: 'https://github.com/mem9-ai/mem9-console-server/pull/64' },
+            { label: 'console-fe #52', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/52' },
+          ],
+        },
+        {
+          date: 'June 3, 2026',
+          title: 'Embedded billing, payment methods, and invoices',
+          summary:
+            'The Console billing area now includes a fuller Stripe-backed billing experience: current plan, billing address, payment methods, plan change controls, coupons, cancel/resume actions, and invoice history.',
+          sections: [
+            {
+              title: 'Where to manage it',
+              items: [
+                'Open Console, select the organization, then go to Billing.',
+                'Use Upgrade or Change plan to enter billing details, choose a plan, and confirm payment with Stripe Elements.',
+                'Review saved payment methods and invoices from the same Billing page.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'console-fe #53', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/53' },
+            { label: 'console-fe #34', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/34' },
+            { label: 'console-fe #28', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/28' },
+          ],
+        },
+        {
+          date: 'June 1, 2026',
+          title: 'Space Chain knowledge routing',
+          summary:
+            'Space Chains can now route extracted knowledge to the right Space Chain node based on routing policy fields. This makes a chain act more like a knowledgebase: broad ingest can land in the right team, project, or topic Space while recall still works across the chain.',
+          sections: [
+            {
+              title: 'Routing setup',
+              items: [
+                'Open a Space Chain detail page and configure the knowledge extraction policy.',
+                'Use the node selector and routing diagram to decide where extracted facts should be written.',
+                'When creating memory, enable smart ingest to extract and route facts instead of writing only one raw memory item.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'mem9 #337', href: 'https://github.com/mem9-ai/mem9/pull/337' },
+            { label: 'console-server #61', href: 'https://github.com/mem9-ai/mem9-console-server/pull/61' },
+            { label: 'console-fe #56', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/56' },
+          ],
+        },
+        {
+          date: 'June 1, 2026',
+          title: 'Server-side memory sorting and search controls',
+          summary:
+            'Memory tables now sort and filter against the full server result set, not just the current page. Users can sort by content, type, tags, and updated time while combining the sort with search controls.',
+          sections: [
+            {
+              title: 'Table controls',
+              items: [
+                'Open a Space or Space Chain memory workbench.',
+                'Click a table header to sort ascending or descending.',
+                'Use the search fields for content, type, and tags; the server applies the filter and sort before pagination.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'mem9 #338', href: 'https://github.com/mem9-ai/mem9/pull/338' },
+            { label: 'console-fe #57', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/57' },
+          ],
+        },
+      ],
+    },
+    {
+      period: 'May 2026',
+      items: [
+        {
+          date: 'May 30, 2026',
+          title: 'Faster Space Chain recall with timing visibility',
+          summary:
+            'Space Chain recall now parallelizes node scans and auth resolution, then keeps global reranking behavior. The Console also shows recall timing so teams can see how long test recalls take.',
+          sections: [
+            {
+              title: 'What changed',
+              body: 'Recall work is parallelized behind the scenes, while global reranking behavior stays the same.',
+            },
+            {
+              title: 'How to validate',
+              items: [
+                'Open a Space Chain detail page and use the Recall test panel.',
+                'Enable Force scanAll when you want to test cross-chain recall behavior.',
+                'Check the elapsed time shown with the result to compare query performance.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'mem9 #335', href: 'https://github.com/mem9-ai/mem9/pull/335' },
+            { label: 'mem9 #326', href: 'https://github.com/mem9-ai/mem9/pull/326' },
+            { label: 'console-fe #51', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/51' },
+          ],
+        },
+        {
+          date: 'May 25, 2026',
+          title: 'Session memory management and batch cleanup',
+          summary:
+            'The memory workbench can now list session memory rows, filter by All, Insight, Pinned, or Session, select rows, change page size, and delete selected memories in bulk. The API also supports session-row deletion and a request-level switch to avoid saving raw session rows when only extracted facts are needed.',
+          sections: [
+            {
+              title: 'Console cleanup',
+              items: [
+                'Open a Space memory workbench and choose the memory type filter.',
+                'Select one or more rows, then delete selected memories from the toolbar.',
+              ],
+            },
+            {
+              title: 'API option',
+              body: 'For API ingest flows, set `disableSessionSave` when you want fact extraction without preserving raw session messages.',
+            },
+          ],
+          sources: [
+            { label: 'mem9 #327', href: 'https://github.com/mem9-ai/mem9/pull/327' },
+            { label: 'mem9 #332', href: 'https://github.com/mem9-ai/mem9/pull/332' },
+            { label: 'console-server #56', href: 'https://github.com/mem9-ai/mem9-console-server/pull/56' },
+            { label: 'console-fe #47', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/47' },
+          ],
+        },
+        {
+          date: 'May 26, 2026',
+          title: 'Console localization for seven languages',
+          summary:
+            'The Console now supports English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Indonesian, and Thai across the shell, auth pages, Spaces, Memories, Settings, Project, and Space Chain flows.',
+          sections: [
+            {
+              title: 'Language switcher',
+              items: [
+                'Open the language menu in the Console header or auth page.',
+                'Choose a language; the selection is saved locally and updates the document language.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'console-fe #49', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/49' },
+          ],
+        },
+        {
+          date: 'May 19, 2026',
+          title: 'Billing and usage dashboards',
+          summary:
+            'Organizations can review billing plan state, entitlements, request usage summaries, daily rollups, and detailed usage events. The runtime now has quota gates and durable metering so commercial usage can be tracked without changing self-hosted behavior.',
+          sections: [
+            {
+              title: 'Where to view it',
+              items: [
+                'Open Console and select an organization.',
+                'Go to Billing to review plan and entitlement state.',
+                'Go to Usage to inspect memory recall and memory write request totals over a selected date range.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'mem9 #309', href: 'https://github.com/mem9-ai/mem9/pull/309' },
+            { label: 'console-server #30', href: 'https://github.com/mem9-ai/mem9-console-server/pull/30' },
+            { label: 'console-server #31', href: 'https://github.com/mem9-ai/mem9-console-server/pull/31' },
+            { label: 'console-server #33', href: 'https://github.com/mem9-ai/mem9-console-server/pull/33' },
+            { label: 'console-fe #28', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/28' },
+          ],
+        },
+        {
+          date: 'May 19, 2026',
+          title: 'Space memory explorer and runtime tools',
+          summary:
+            'Spaces now have a memory workbench with summary metrics, imports, memory list/detail reads, create/edit/delete controls, and a shared recall test panel. Raw API keys stay server-side while Console proxies the authorized memory operations.',
+          sections: [
+            {
+              title: 'Workspace tools',
+              items: [
+                'Open a Space detail page in Console.',
+                'Use the Memories tab to browse, create, edit, or delete memories.',
+                'Use the Recall test panel to test what the Space would retrieve for a query.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'console-server #32', href: 'https://github.com/mem9-ai/mem9-console-server/pull/32' },
+            { label: 'console-server #35', href: 'https://github.com/mem9-ai/mem9-console-server/pull/35' },
+            { label: 'console-server #37', href: 'https://github.com/mem9-ai/mem9-console-server/pull/37' },
+            { label: 'console-fe #29', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/29' },
+          ],
+        },
+        {
+          date: 'May 15, 2026',
+          title: 'Space Chain runtime support',
+          summary:
+            'Space Chains are now available at runtime, with ordered recall and write behavior, chain key authentication, and provenance in chain responses. This lets a single chain key retrieve from multiple Spaces in a controlled order.',
+          sections: [
+            {
+              title: 'Runtime setup',
+              items: [
+                'Create or open a Space Chain in Console.',
+                'Add Space nodes in the order you want recall to search them.',
+                'Create a chain key binding, then use that key with `scanAll=true` when you want recall across the chain.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'mem9 #308', href: 'https://github.com/mem9-ai/mem9/pull/308' },
+            { label: 'console-server #37', href: 'https://github.com/mem9-ai/mem9-console-server/pull/37' },
+            { label: 'console-fe #29', href: 'https://github.com/mem9-ai/mem9-console-fe/pull/29' },
+          ],
+        },
+        {
+          date: 'May 14, 2026',
+          title: 'Safer Space API key management and organization roles',
+          summary:
+            'Space API keys are stored in an encrypted catalog with stable masked display values, explicit reveal workflows, and active binding checks. Organization roles now distinguish owner, admin, and member permissions for resource and key management.',
+          sections: [
+            {
+              title: 'Permissions',
+              items: [
+                'Owners and admins can create, bind, and reveal Space keys from the Space key management flow.',
+                'Members can continue reading allowed resources without receiving mutation permissions.',
+                'Use masked key values in normal views; reveal a key only when you need to copy it into a client.',
+              ],
+            },
+          ],
+          sources: [
+            { label: 'console-server #28', href: 'https://github.com/mem9-ai/mem9-console-server/pull/28' },
+            { label: 'console-server #27', href: 'https://github.com/mem9-ai/mem9-console-server/pull/27' },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const releaseNotesPageCopyZh = attachReleaseNoteSources({
+  meta: {
+    title: '发布说明 | mem9',
+    description: 'mem9 面向客户的发布说明，覆盖 Console、API、Space Chain、计费和记忆管理的新功能。',
+  },
+  kicker: '发布说明',
+  title: 'mem9 最近更新了什么',
+  intro: 'mem9 作者们最近发布的重要更新。',
+  heroImageAlt: 'mem9 发布说明插图，展示记忆芯片和金色数据流',
+  starPrompt: '开源项目不容易，请大家给我们Star来支持我们。',
+  starBadgeAlt: 'mem9-ai/mem9 的 GitHub Stars',
+  starBadgeSrc: 'https://img.shields.io/github/stars/mem9-ai/mem9?style=social',
+  starHref: 'https://github.com/mem9-ai/mem9',
+  updatedLabel: '最后更新',
+  updatedValue: '2026 年 6 月 4 日',
+  sourcesLabel: 'PR 来源',
+  sourcesFeedback: '欢迎进入PR、issue提交您的反馈。',
+  groups: [
+    {
+      period: '2026 年 6 月',
+      items: [
+        {
+          date: '2026 年 6 月 4 日',
+          title: 'mem9.ai 官方服务迎来重要性能更新',
+          summary:
+            'mem9.ai 官方服务正在进行一次重要的性能优化。由于早期部署时服务和数据库存在跨区访问，API 请求产生了额外延迟。我们正在分两个阶段迁移数据，以显著降低官方托管服务的 API 延迟。',
+          sections: [
+            {
+              title: '发布节奏',
+              items: [
+                '第一阶段已在北京时间 6 月 4 日中午发布，将普遍 API 延迟从平均约 4-6 秒降低到约 1.3 秒。',
+                '第二阶段预计在本周完成元数据迁移，目标是把平均延迟进一步降低到几百毫秒以内。',
+              ],
+            },
+            {
+              title: '反馈',
+              body: '这次更新不需要客户端改动，会直接优化 mem9.ai 官方服务链路。欢迎大家继续反馈 mem9 官方服务的性能体验。',
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 4 日',
+          title: '同一个 API key 下的 appId 隔离',
+          summary:
+            '同一个 mem9 API key 现在可以通过 `appId` 承载多个相互隔离的应用记忆空间。写入时带 appId 的 memory 和 raw session 会归属到对应应用，适合把不同产品、Agent、环境或工作流放在同一把 key 下，同时避免日常记忆互相混在一起。',
+          sections: [
+            {
+              title: 'appId 如何隔离记忆',
+              items: [
+                '写入 memory 或 ingest messages 时传入 `appId`，例如 `appId: "docs"` 或 `appId: "support-bot"`。',
+                '搜索时，不传 `appId` 表示跨该 key 下的全部 appId 搜索；传非空 appId 表示只查一个子空间；传 `appId=null` 或 `appId=` 表示只查默认/global 记忆。',
+                '在 Console 中，可以用 appId 过滤器、appId 列和创建 memory 时的 appId 字段，查看或写入某个应用的记忆。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 4 日',
+          title: 'API 文档更新，并支持站内直接测试 API',
+          summary:
+            'mem9 API 文档完成了一次重要更新：页面布局更清晰，endpoint 内容补充得更完整，并新增了内置 API 测试控制台。开发者现在可以在同一个页面阅读文档并直接发起请求，不必在文档和外部调试工具之间来回切换。',
+          sections: [
+            {
+              title: '更新内容',
+              items: [
+                'API 页面更新了侧边栏和 endpoint 信息结构，阅读路径更清晰。',
+                '文档内容补充了鉴权、appId 隔离、memory API、imports、session messages 和 Space Chain API。',
+              ],
+            },
+            {
+              title: '在哪里体验',
+              body: '从站点导航打开 API 页面，在 API test 面板里设置 base URL、API key、headers、path/query/body 字段，运行请求，并直接在文档页查看响应。',
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 3 日',
+          title: '把已有 mem9 API key 导入 Console',
+          summary:
+            '已经通过 Agent 安装或 API 流程拿到 mem9 API key 的用户，现在可以把 key 绑定到 Console 的 Space。Console 会保护原始 key，只展示脱敏信息，并把已认领的 key 纳入组织配额模型。',
+          sections: [
+            {
+              title: '认领流程',
+              items: [
+                '从安装流程里的认领链接进入 Console，或直接打开 `/console/claim`。',
+                '粘贴已有 key，选择组织和项目，然后绑定到一个空 Space，或在流程中创建新 Space。',
+                '绑定后即可在 Console 管理这个 Space，普通页面不会暴露原始 key。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 3 日',
+          title: '内嵌计费、支付方式和发票',
+          summary:
+            'Console 的 Billing 区域现在提供更完整的 Stripe 计费体验，包括当前套餐、账单地址、支付方式、套餐变更、优惠码、取消/恢复订阅和发票历史。',
+          sections: [
+            {
+              title: '在哪里管理',
+              items: [
+                '打开 Console，选择组织，然后进入 Billing。',
+                '点击 Upgrade 或 Change plan，填写账单信息、选择套餐，并通过 Stripe Elements 完成支付确认。',
+                '在同一个 Billing 页面查看已保存的支付方式和发票。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 1 日',
+          title: 'Space Chain 知识路由',
+          summary:
+            'Space Chain 现在可以根据路由策略把提取出的知识写入正确的链节点。这样一条链可以像知识库一样工作：宽泛输入会落到对应团队、项目或主题 Space，同时仍可跨链召回。',
+          sections: [
+            {
+              title: '路由配置',
+              items: [
+                '打开 Space Chain 详情页，配置 knowledge extraction policy。',
+                '通过节点选择器和路由图决定提取出的事实应该写到哪里。',
+                '创建 memory 时启用 smart ingest，让系统提取并路由事实，而不是只写入一条原始 memory。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 1 日',
+          title: '服务端记忆排序和搜索控件',
+          summary:
+            'Memory 表格现在会基于服务端完整结果集排序和过滤，而不是只重排当前页。用户可以按内容、类型、标签和更新时间排序，并结合搜索条件使用。',
+          sections: [
+            {
+              title: '表格控件',
+              items: [
+                '打开 Space 或 Space Chain 的 memory workbench。',
+                '点击表头切换升序或降序排序。',
+                '使用内容、类型和标签搜索框；服务端会先过滤和排序，再分页返回。',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      period: '2026 年 5 月',
+      items: [
+        {
+          date: '2026 年 5 月 30 日',
+          title: '更快的 Space Chain 召回和耗时展示',
+          summary:
+            'Space Chain 召回现在会并行扫描节点并并行解析鉴权节点，同时保留全局 rerank 行为。Console 也会展示召回耗时，方便团队观察测试查询的速度。',
+          sections: [
+            {
+              title: '变更内容',
+              body: '召回链路在后台并行化处理，同时保留全局 rerank 行为。',
+            },
+            {
+              title: '如何验证',
+              items: [
+                '打开 Space Chain 详情页，使用 Recall test 面板。',
+                '需要测试跨链召回时启用 Force scanAll。',
+                '查看结果旁边的耗时，用来比较查询性能。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 25 日',
+          title: 'Session memory 管理和批量清理',
+          summary:
+            'Memory workbench 现在可以列出 session memory，按 All、Insight、Pinned、Session 过滤，选择行、调整页大小，并批量删除选中的 memories。API 也支持删除 session 行，并支持只提取事实、不保存原始 session 的请求级开关。',
+          sections: [
+            {
+              title: 'Console 清理',
+              items: [
+                '打开 Space memory workbench，选择 memory 类型过滤器。',
+                '选择一行或多行，然后从工具栏删除选中的 memories。',
+              ],
+            },
+            {
+              title: 'API 选项',
+              body: 'API ingest 时，如果只需要事实提取、不想保存原始会话消息，可设置 `disableSessionSave`。',
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 26 日',
+          title: 'Console 支持七种语言',
+          summary:
+            'Console 现在支持英语、简体中文、繁体中文、日语、韩语、印尼语和泰语，覆盖 shell、登录页、Spaces、Memories、Settings、Project 和 Space Chain 流程。',
+          sections: [
+            {
+              title: '语言切换',
+              items: [
+                '在 Console header 或登录页打开语言菜单。',
+                '选择语言；选择会保存在本地，并更新页面语言属性。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 19 日',
+          title: '计费和用量看板',
+          summary:
+            '组织现在可以查看计费套餐状态、权益、请求用量汇总、每日 rollup 和详细用量事件。runtime 已支持配额闸门和持久 metering，用于商业用量跟踪，同时不改变自托管行为。',
+          sections: [
+            {
+              title: '在哪里查看',
+              items: [
+                '打开 Console 并选择组织。',
+                '进入 Billing 查看套餐和权益状态。',
+                '进入 Usage，按日期范围查看 memory recall 和 memory write 请求总量。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 19 日',
+          title: 'Space memory 浏览器和运行时工具',
+          summary:
+            'Space 现在有 memory workbench，支持汇总指标、imports、memory 列表/详情、创建/编辑/删除，以及共享 Recall test 面板。原始 API key 保持在服务端，Console 会代理已授权的 memory 操作。',
+          sections: [
+            {
+              title: '工作台能力',
+              items: [
+                '在 Console 打开 Space 详情页。',
+                '使用 Memories tab 浏览、创建、编辑或删除 memories。',
+                '使用 Recall test 面板测试这个 Space 对查询会召回什么。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 15 日',
+          title: 'Space Chain 运行时支持',
+          summary:
+            'Space Chain 现在可在运行时使用，支持有序召回和写入、chain key 鉴权，以及链响应中的来源信息。一个 chain key 可以按受控顺序从多个 Space 召回。',
+          sections: [
+            {
+              title: '运行时配置',
+              items: [
+                '在 Console 创建或打开 Space Chain。',
+                '按照希望召回搜索的顺序添加 Space 节点。',
+                '创建 chain key binding；需要跨链召回时，用这个 key 并设置 `scanAll=true`。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 14 日',
+          title: '更安全的 Space API key 管理和组织角色',
+          summary:
+            'Space API key 会存储在加密目录中，普通页面展示稳定的脱敏值，并提供显式 reveal 流程和 active binding 检查。组织角色现在区分 owner、admin 和 member 权限。',
+          sections: [
+            {
+              title: '权限变化',
+              items: [
+                'Owner 和 admin 可以在 Space key 管理流程中创建、绑定和 reveal key。',
+                'Member 可以继续读取允许访问的资源，但没有变更权限。',
+                '普通页面使用脱敏 key；只有需要复制到客户端时才 reveal。',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const releaseNotesPageCopyZhHant = attachReleaseNoteSources({
+  meta: {
+    title: '發布說明 | mem9',
+    description: 'mem9 面向客戶的發布說明，涵蓋 Console、API、Space Chain、計費和記憶管理的新功能。',
+  },
+  kicker: '發布說明',
+  title: 'mem9 最近更新了什麼',
+  intro: 'mem9 作者們最近發布的重要更新。',
+  heroImageAlt: 'mem9 發布說明插圖，展示記憶晶片和金色資料流',
+  starPrompt: '開源專案不容易，請大家給我們Star來支持我們。',
+  starBadgeAlt: 'mem9-ai/mem9 的 GitHub Stars',
+  starBadgeSrc: 'https://img.shields.io/github/stars/mem9-ai/mem9?style=social',
+  starHref: 'https://github.com/mem9-ai/mem9',
+  updatedLabel: '最後更新',
+  updatedValue: '2026 年 6 月 4 日',
+  sourcesLabel: 'PR 來源',
+  sourcesFeedback: '歡迎進入PR、issue提交您的回饋。',
+  groups: [
+    {
+      period: '2026 年 6 月',
+      items: [
+        {
+          date: '2026 年 6 月 4 日',
+          title: 'mem9.ai 官方服務迎來重要效能更新',
+          summary:
+            'mem9.ai 官方服務正在進行重要效能優化。由於早期部署時服務和資料庫存在跨區存取，API 請求產生了額外延遲。我們正在分兩個階段遷移資料，以大幅降低官方託管服務的 API 延遲。',
+          sections: [
+            {
+              title: '發布節奏',
+              items: [
+                '第一階段已在北京時間 6 月 4 日中午發布，將普遍 API 延遲從平均約 4-6 秒降低到約 1.3 秒。',
+                '第二階段預計在本週完成中繼資料遷移，目標是把平均延遲進一步降低到幾百毫秒以內。',
+              ],
+            },
+            {
+              title: '回饋',
+              body: '這次更新不需要客戶端改動，會直接優化 mem9.ai 官方服務鏈路。歡迎大家繼續回饋 mem9 官方服務的效能體驗。',
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 4 日',
+          title: '同一把 API key 下的 appId 隔離',
+          summary:
+            '同一把 mem9 API key 現在可以透過 `appId` 承載多個彼此隔離的應用記憶空間。寫入時帶 appId 的 memory 和 raw session 會歸屬到對應應用，適合把不同產品、Agent、環境或工作流程放在同一把 key 下，同時避免日常記憶互相混在一起。',
+          sections: [
+            {
+              title: 'appId 如何隔離記憶',
+              items: [
+                '寫入 memory 或 ingest messages 時傳入 `appId`，例如 `appId: "docs"` 或 `appId: "support-bot"`。',
+                '搜尋時，不傳 `appId` 表示跨該 key 下的全部 appId 搜尋；傳非空 appId 表示只查一個子空間；傳 `appId=null` 或 `appId=` 表示只查預設/global 記憶。',
+                '在 Console 中，可以用 appId 篩選器、appId 欄位和建立 memory 時的 appId 欄位，查看或寫入某個應用的記憶。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 4 日',
+          title: 'API 文件更新，並支援站內直接測試 API',
+          summary:
+            'mem9 API 文件完成重要更新：頁面版面更清楚，endpoint 內容補充得更完整，並新增內建 API 測試控制台。開發者現在可以在同一個頁面閱讀文件並直接發起請求，不必在文件和外部除錯工具之間來回切換。',
+          sections: [
+            {
+              title: '更新內容',
+              items: [
+                'API 頁面更新了側邊欄和 endpoint 資訊結構，閱讀路徑更清晰。',
+                '文件內容補充了鑑權、appId 隔離、memory API、imports、session messages 和 Space Chain API。',
+              ],
+            },
+            {
+              title: '在哪裡體驗',
+              body: '從站點導覽開啟 API 頁面，在 API test 面板裡設定 base URL、API key、headers、path/query/body 欄位，執行請求，並直接在文件頁查看回應。',
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 3 日',
+          title: '把既有 mem9 API key 匯入 Console',
+          summary:
+            '已經透過 Agent 安裝或 API 流程拿到 mem9 API key 的使用者，現在可以把 key 綁定到 Console 的 Space。Console 會保護原始 key，只顯示脫敏資訊，並把已認領的 key 納入組織配額模型。',
+          sections: [
+            {
+              title: '認領流程',
+              items: [
+                '從安裝流程裡的認領連結進入 Console，或直接開啟 `/console/claim`。',
+                '貼上既有 key，選擇組織和專案，然後綁定到一個空 Space，或在流程中建立新 Space。',
+                '綁定後即可在 Console 管理這個 Space，普通頁面不會暴露原始 key。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 3 日',
+          title: '內嵌計費、付款方式和發票',
+          summary:
+            'Console 的 Billing 區域現在提供更完整的 Stripe 計費體驗，包括目前方案、帳單地址、付款方式、方案變更、優惠碼、取消/恢復訂閱和發票歷史。',
+          sections: [
+            {
+              title: '在哪裡管理',
+              items: [
+                '開啟 Console，選擇組織，然後進入 Billing。',
+                '點擊 Upgrade 或 Change plan，填寫帳單資訊、選擇方案，並透過 Stripe Elements 完成付款確認。',
+                '在同一個 Billing 頁面查看已儲存的付款方式和發票。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 1 日',
+          title: 'Space Chain 知識路由',
+          summary:
+            'Space Chain 現在可以根據路由策略把提取出的知識寫入正確的鏈節點。這樣一條鏈可以像知識庫一樣工作：寬泛輸入會落到對應團隊、專案或主題 Space，同時仍可跨鏈召回。',
+          sections: [
+            {
+              title: '路由設定',
+              items: [
+                '開啟 Space Chain 詳情頁，設定 knowledge extraction policy。',
+                '透過節點選擇器和路由圖決定提取出的事實應該寫到哪裡。',
+                '建立 memory 時啟用 smart ingest，讓系統提取並路由事實，而不是只寫入一條原始 memory。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 6 月 1 日',
+          title: '服務端記憶排序和搜尋控制',
+          summary:
+            'Memory 表格現在會基於服務端完整結果集排序和篩選，而不是只重排目前頁面。使用者可以按內容、類型、標籤和更新時間排序，並結合搜尋條件使用。',
+          sections: [
+            {
+              title: '表格控制',
+              items: [
+                '開啟 Space 或 Space Chain 的 memory workbench。',
+                '點擊表頭切換升序或降序排序。',
+                '使用內容、類型和標籤搜尋框；服務端會先篩選和排序，再分頁返回。',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      period: '2026 年 5 月',
+      items: [
+        {
+          date: '2026 年 5 月 30 日',
+          title: '更快的 Space Chain 召回和耗時展示',
+          summary:
+            'Space Chain 召回現在會並行掃描節點並並行解析鑑權節點，同時保留全域 rerank 行為。Console 也會展示召回耗時，方便團隊觀察測試查詢速度。',
+          sections: [
+            {
+              title: '變更內容',
+              body: '召回鏈路在後台並行化處理，同時保留全域 rerank 行為。',
+            },
+            {
+              title: '如何驗證',
+              items: [
+                '開啟 Space Chain 詳情頁，使用 Recall test 面板。',
+                '需要測試跨鏈召回時啟用 Force scanAll。',
+                '查看結果旁邊的耗時，用來比較查詢效能。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 25 日',
+          title: 'Session memory 管理和批量清理',
+          summary:
+            'Memory workbench 現在可以列出 session memory，按 All、Insight、Pinned、Session 篩選，選擇行、調整頁大小，並批量刪除選中的 memories。API 也支援刪除 session 行，並支援只提取事實、不保存原始 session 的請求級開關。',
+          sections: [
+            {
+              title: 'Console 清理',
+              items: [
+                '開啟 Space memory workbench，選擇 memory 類型篩選器。',
+                '選擇一行或多行，然後從工具列刪除選中的 memories。',
+              ],
+            },
+            {
+              title: 'API 選項',
+              body: 'API ingest 時，如果只需要事實提取、不想保存原始會話訊息，可設定 `disableSessionSave`。',
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 26 日',
+          title: 'Console 支援七種語言',
+          summary:
+            'Console 現在支援英語、簡體中文、繁體中文、日語、韓語、印尼語和泰語，覆蓋 shell、登入頁、Spaces、Memories、Settings、Project 和 Space Chain 流程。',
+          sections: [
+            {
+              title: '語言切換',
+              items: [
+                '在 Console header 或登入頁開啟語言選單。',
+                '選擇語言；選擇會保存在本地，並更新頁面語言屬性。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 19 日',
+          title: '計費和用量看板',
+          summary:
+            '組織現在可以查看計費方案狀態、權益、請求用量彙總、每日 rollup 和詳細用量事件。runtime 已支援配額閘門和持久 metering，用於商業用量追蹤，同時不改變自託管行為。',
+          sections: [
+            {
+              title: '在哪裡查看',
+              items: [
+                '開啟 Console 並選擇組織。',
+                '進入 Billing 查看方案和權益狀態。',
+                '進入 Usage，按日期範圍查看 memory recall 和 memory write 請求總量。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 19 日',
+          title: 'Space memory 瀏覽器和執行時工具',
+          summary:
+            'Space 現在有 memory workbench，支援彙總指標、imports、memory 列表/詳情、建立/編輯/刪除，以及共用 Recall test 面板。原始 API key 保持在服務端，Console 會代理已授權的 memory 操作。',
+          sections: [
+            {
+              title: '工作台能力',
+              items: [
+                '在 Console 開啟 Space 詳情頁。',
+                '使用 Memories tab 瀏覽、建立、編輯或刪除 memories。',
+                '使用 Recall test 面板測試這個 Space 對查詢會召回什麼。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 15 日',
+          title: 'Space Chain 執行時支援',
+          summary:
+            'Space Chain 現在可在執行時使用，支援有序召回和寫入、chain key 鑑權，以及鏈回應中的來源資訊。一個 chain key 可以按受控順序從多個 Space 召回。',
+          sections: [
+            {
+              title: '執行時設定',
+              items: [
+                '在 Console 建立或開啟 Space Chain。',
+                '按照希望召回搜尋的順序新增 Space 節點。',
+                '建立 chain key binding；需要跨鏈召回時，用這個 key 並設定 `scanAll=true`。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026 年 5 月 14 日',
+          title: '更安全的 Space API key 管理和組織角色',
+          summary:
+            'Space API key 會儲存在加密目錄中，普通頁面展示穩定的脫敏值，並提供明確 reveal 流程和 active binding 檢查。組織角色現在區分 owner、admin 和 member 權限。',
+          sections: [
+            {
+              title: '權限變化',
+              items: [
+                'Owner 和 admin 可以在 Space key 管理流程中建立、綁定和 reveal key。',
+                'Member 可以繼續讀取允許存取的資源，但沒有變更權限。',
+                '普通頁面使用脫敏 key；只有需要複製到客戶端時才 reveal。',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const releaseNotesPageCopyJa = attachReleaseNoteSources({
+  meta: {
+    title: 'リリースノート | mem9',
+    description: 'Console、API、Space Chain、課金、メモリ管理に関する mem9 の顧客向けリリースノートです。',
+  },
+  kicker: 'リリースノート',
+  title: 'mem9 の最新アップデート',
+  intro: 'mem9 作者による最近の重要アップデートです。',
+  heroImageAlt: 'メモリーチップと金色のデータストリームを描いた mem9 リリースノートのイラスト',
+  starPrompt: 'オープンソースの継続は簡単ではありません。GitHub で mem9 に Star を付けて応援してください。',
+  starBadgeAlt: 'mem9-ai/mem9 の GitHub Stars',
+  starBadgeSrc: 'https://img.shields.io/github/stars/mem9-ai/mem9?style=social',
+  starHref: 'https://github.com/mem9-ai/mem9',
+  updatedLabel: '最終更新',
+  updatedValue: '2026年6月4日',
+  sourcesLabel: 'PR ソース',
+  sourcesFeedback: 'PR や issue を開いて、ぜひフィードバックをお寄せください。',
+  groups: [
+    {
+      period: '2026年6月',
+      items: [
+        {
+          date: '2026年6月4日',
+          title: 'mem9.ai 公式サービスの重要なパフォーマンス更新',
+          summary:
+            'mem9.ai 公式サービスで重要なパフォーマンス改善を進めています。初期デプロイ時の構成により、一部のサービスとデータベースがリージョンをまたいで動作していたため、API リクエストに余分な遅延が発生していました。データ移行を 2 段階で進め、公式ホストサービスの API レイテンシを大きく下げます。',
+          sections: [
+            {
+              title: 'ロールアウト',
+              items: [
+                '第 1 段階は北京時間 6 月 4 日正午にリリースされ、一般的な API レイテンシは平均約 4-6 秒から約 1.3 秒に下がりました。',
+                '第 2 段階ではメタデータを移行し、今週中の完了を予定しています。平均レイテンシを数百ミリ秒以内に下げることを目標にしています。',
+              ],
+            },
+            {
+              title: 'フィードバック',
+              body: 'クライアント側の変更は不要です。この更新は mem9.ai 公式サービスの経路を直接改善します。公式サービスのパフォーマンスに関するフィードバックを歓迎します。',
+            },
+          ],
+        },
+        {
+          date: '2026年6月4日',
+          title: '1 つの API key で appId ごとの分離',
+          summary:
+            '1 つの mem9 API key で、`appId` によって複数の分離されたアプリケーションメモリ空間を扱えるようになりました。appId 付きで書き込まれた memory と raw session は対応するアプリに紐づくため、異なるプロダクト、Agent、環境、ワークフローを同じ key で扱いながら日常的なメモリの混在を避けられます。',
+          sections: [
+            {
+              title: 'appId によるメモリ分離',
+              items: [
+                'memory の書き込みや ingest messages では `appId` を送ります。例: `appId: "docs"` または `appId: "support-bot"`。',
+                '検索時は、`appId` を省略すると key 配下の全 appId を横断検索します。空でない appId を渡すと 1 つのサブ空間のみ、`appId=null` または `appId=` を渡すとデフォルト/global メモリのみを検索します。',
+                'Console では appId フィルター、appId 列、memory 作成時の appId フィールドを使って、特定アプリのメモリを確認または書き込みできます。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年6月4日',
+          title: 'API ドキュメント刷新とページ内 API テスト',
+          summary:
+            'mem9 API リファレンスを刷新しました。レイアウトを整理し、endpoint の内容を更新し、組み込みの API テストコンソールを追加しています。開発者はドキュメントと別ツールを行き来せず、同じページで読みながらリクエストを試せます。',
+          sections: [
+            {
+              title: '変更点',
+              items: [
+                'API ページのサイドバーと endpoint レイアウトが読みやすくなりました。',
+                '認証、appId 分離、memory API、imports、session messages、Space Chain API の内容を更新しました。',
+              ],
+            },
+            {
+              title: '試す場所',
+              body: 'サイトナビゲーションから API ページを開き、API test パネルで base URL、API key、headers、path/query/body フィールドを設定してリクエストを実行し、レスポンスをその場で確認できます。',
+            },
+          ],
+        },
+        {
+          date: '2026年6月3日',
+          title: '既存の mem9 API key を Console にインポート',
+          summary:
+            'Agent セットアップや API フローで既に mem9 API key を受け取っているユーザーは、その key を Console の Space に紐づけられるようになりました。Console は生の key を保護し、マスク済み情報のみを表示し、認領済み key を組織のクォータモデルに移行します。',
+          sections: [
+            {
+              title: '認領フロー',
+              items: [
+                'セットアップ手順の認領リンクから Console を開くか、直接 `/console/claim` にアクセスします。',
+                '既存 key を貼り付け、組織とプロジェクトを選び、空の Space に紐づけるかフロー内で新しい Space を作成します。',
+                '紐づけ後は Console から Space を管理できます。通常画面では生の key は表示されません。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年6月3日',
+          title: '組み込み課金、支払い方法、請求書',
+          summary:
+            'Console の Billing エリアに、Stripe ベースのより完全な課金体験が入りました。現在のプラン、請求先住所、支払い方法、プラン変更、クーポン、キャンセル/再開、請求書履歴を扱えます。',
+          sections: [
+            {
+              title: '管理場所',
+              items: [
+                'Console を開き、組織を選択して Billing に移動します。',
+                'Upgrade または Change plan から請求情報を入力し、プランを選び、Stripe Elements で支払いを確定します。',
+                '同じ Billing ページで保存済みの支払い方法と請求書を確認できます。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年6月1日',
+          title: 'Space Chain の知識ルーティング',
+          summary:
+            'Space Chain は、ルーティングポリシーのフィールドに基づいて抽出された知識を正しいチェーンノードへ書き込めるようになりました。広い入力を適切なチーム、プロジェクト、トピックの Space に配置しつつ、チェーン全体で recall できます。',
+          sections: [
+            {
+              title: 'ルーティング設定',
+              items: [
+                'Space Chain 詳細ページを開き、knowledge extraction policy を設定します。',
+                'ノードセレクターとルーティング図で、抽出された事実を書き込む場所を決めます。',
+                'memory 作成時に smart ingest を有効にすると、単一の raw memory だけでなく事実を抽出してルーティングできます。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年6月1日',
+          title: 'サーバー側メモリ並び替えと検索コントロール',
+          summary:
+            'Memory テーブルは現在ページだけでなく、サーバー側の完全な結果セットに対して並び替えとフィルターを適用します。内容、種類、タグ、更新日時で並び替えながら検索条件と組み合わせられます。',
+          sections: [
+            {
+              title: 'テーブル操作',
+              items: [
+                'Space または Space Chain の memory workbench を開きます。',
+                'テーブルヘッダーをクリックして昇順または降順に切り替えます。',
+                '内容、種類、タグの検索欄を使います。サーバーはページネーション前にフィルターと並び替えを適用します。',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      period: '2026年5月',
+      items: [
+        {
+          date: '2026年5月30日',
+          title: 'タイミング表示付きの高速 Space Chain recall',
+          summary:
+            'Space Chain recall はノードスキャンと認証解決を並列化し、グローバル rerank の動作を保ったまま高速化しました。Console では recall の所要時間も表示され、テストクエリの速度を確認できます。',
+          sections: [
+            {
+              title: '変更点',
+              body: 'recall 処理はバックグラウンドで並列化され、グローバル rerank の動作は維持されます。',
+            },
+            {
+              title: '確認方法',
+              items: [
+                'Space Chain 詳細ページを開き、Recall test パネルを使います。',
+                'チェーン横断の recall をテストしたい場合は Force scanAll を有効にします。',
+                '結果に表示される経過時間を見てクエリ性能を比較できます。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年5月25日',
+          title: 'Session memory 管理と一括クリーンアップ',
+          summary:
+            'memory workbench で session memory 行を一覧表示し、All、Insight、Pinned、Session でフィルターし、行選択、ページサイズ変更、選択した memories の一括削除ができるようになりました。API でも session 行の削除と、抽出事実だけが必要な場合に raw session を保存しないリクエスト単位のスイッチをサポートします。',
+          sections: [
+            {
+              title: 'Console での整理',
+              items: [
+                'Space memory workbench を開き、memory type フィルターを選択します。',
+                '1 行または複数行を選び、ツールバーから選択した memories を削除します。',
+              ],
+            },
+            {
+              title: 'API オプション',
+              body: 'API ingest フローでは、raw session message を保存せず事実抽出だけを行いたい場合に `disableSessionSave` を設定します。',
+            },
+          ],
+        },
+        {
+          date: '2026年5月26日',
+          title: 'Console が 7 言語に対応',
+          summary:
+            'Console は英語、簡体字中国語、繁体字中国語、日本語、韓国語、インドネシア語、タイ語に対応しました。shell、認証ページ、Spaces、Memories、Settings、Project、Space Chain フローをカバーします。',
+          sections: [
+            {
+              title: '言語切り替え',
+              items: [
+                'Console ヘッダーまたは認証ページで言語メニューを開きます。',
+                '言語を選択します。選択はローカルに保存され、ドキュメント言語も更新されます。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年5月19日',
+          title: '課金と利用状況ダッシュボード',
+          summary:
+            '組織は課金プラン状態、権限、リクエスト利用状況のサマリー、日次 rollup、詳細な利用イベントを確認できます。runtime にはクォータゲートと永続 metering が入り、セルフホスト挙動を変えずに商用利用を追跡できます。',
+          sections: [
+            {
+              title: '確認場所',
+              items: [
+                'Console を開き、組織を選択します。',
+                'Billing でプランと権限状態を確認します。',
+                'Usage で日付範囲を選び、memory recall と memory write のリクエスト合計を確認します。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年5月19日',
+          title: 'Space memory explorer と runtime ツール',
+          summary:
+            'Spaces に memory workbench が追加され、サマリーメトリクス、imports、memory 一覧/詳細、作成/編集/削除、共有 Recall test パネルを利用できます。生の API key はサーバー側に保持され、Console が認可済み memory 操作をプロキシします。',
+          sections: [
+            {
+              title: 'ワークベンチ機能',
+              items: [
+                'Console で Space 詳細ページを開きます。',
+                'Memories tab で memories を閲覧、作成、編集、削除します。',
+                'Recall test パネルで、その Space がクエリに対して何を取得するかをテストします。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年5月15日',
+          title: 'Space Chain runtime 対応',
+          summary:
+            'Space Chains は runtime で利用可能になり、順序付き recall と書き込み、chain key 認証、チェーンレスポンス内の provenance をサポートします。1 つの chain key で複数 Space から制御された順序で recall できます。',
+          sections: [
+            {
+              title: 'runtime 設定',
+              items: [
+                'Console で Space Chain を作成または開きます。',
+                'recall に検索させたい順序で Space ノードを追加します。',
+                'chain key binding を作成し、チェーン横断 recall が必要な場合はその key と `scanAll=true` を使います。',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026年5月14日',
+          title: 'より安全な Space API key 管理と組織ロール',
+          summary:
+            'Space API keys は暗号化されたカタログに保存され、安定したマスク表示、明示的な reveal フロー、active binding チェックを備えます。組織ロールは owner、admin、member の権限を区別します。',
+          sections: [
+            {
+              title: '権限',
+              items: [
+                'Owner と admin は Space key 管理フローで key の作成、紐づけ、reveal ができます。',
+                'Member は許可されたリソースの読み取りを続けられますが、変更権限はありません。',
+                '通常画面ではマスク済み key を使い、クライアントにコピーする必要がある場合だけ reveal します。',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const releaseNotesPageCopyKo = attachReleaseNoteSources({
+  meta: {
+    title: '릴리스 노트 | mem9',
+    description: 'Console, API, Space Chain, 결제, 메모리 관리의 새로운 기능을 다루는 mem9 고객용 릴리스 노트입니다.',
+  },
+  kicker: '릴리스 노트',
+  title: 'mem9의 최신 업데이트',
+  intro: 'mem9 작성자들이 최근 출시한 주요 업데이트입니다.',
+  heroImageAlt: '메모리 칩과 금색 데이터 스트림을 보여 주는 mem9 릴리스 노트 일러스트',
+  starPrompt: '오픈소스 프로젝트를 지속하는 일은 쉽지 않습니다. GitHub에서 mem9에 Star를 눌러 응원해 주세요.',
+  starBadgeAlt: 'mem9-ai/mem9 GitHub Stars',
+  starBadgeSrc: 'https://img.shields.io/github/stars/mem9-ai/mem9?style=social',
+  starHref: 'https://github.com/mem9-ai/mem9',
+  updatedLabel: '마지막 업데이트',
+  updatedValue: '2026년 6월 4일',
+  sourcesLabel: 'PR 출처',
+  sourcesFeedback: 'PR 또는 issue에 들어가 피드백을 남겨 주세요.',
+  groups: [
+    {
+      period: '2026년 6월',
+      items: [
+        {
+          date: '2026년 6월 4일',
+          title: 'mem9.ai 공식 서비스의 주요 성능 업데이트',
+          summary:
+            'mem9.ai 공식 서비스에 중요한 성능 개선을 적용하고 있습니다. 초기 배포 구성 때문에 일부 서비스와 데이터베이스가 서로 다른 리전에 있어 API 요청에 불필요한 지연이 있었습니다. 데이터를 두 단계로 이전해 공식 호스팅 서비스의 API 지연 시간을 크게 낮춥니다.',
+          sections: [
+            {
+              title: '출시 일정',
+              items: [
+                '1단계는 베이징 시간 6월 4일 정오에 배포되었고, 일반적인 API 지연 시간이 평균 약 4-6초에서 약 1.3초로 줄었습니다.',
+                '2단계는 이번 주 안에 메타데이터 이전을 완료할 예정이며, 평균 지연 시간을 수백 밀리초 이내로 낮추는 것이 목표입니다.',
+              ],
+            },
+            {
+              title: '피드백',
+              body: '클라이언트 측 변경은 필요하지 않습니다. 이 업데이트는 mem9.ai 공식 서비스 경로를 직접 개선하며, 공식 서비스 성능에 대한 피드백을 환영합니다.',
+            },
+          ],
+        },
+        {
+          date: '2026년 6월 4일',
+          title: '하나의 API key 안에서 appId 격리',
+          summary:
+            '하나의 mem9 API key가 `appId`로 여러 개의 격리된 애플리케이션 메모리 공간을 담을 수 있습니다. appId와 함께 기록된 memory와 raw session은 해당 앱에 연결되므로, 서로 다른 제품, Agent, 환경, 워크플로를 같은 key로 사용하면서 일상 메모리가 섞이지 않게 할 수 있습니다.',
+          sections: [
+            {
+              title: 'appId가 메모리를 나누는 방식',
+              items: [
+                'memory를 쓰거나 ingest messages를 보낼 때 `appId`를 함께 보냅니다. 예: `appId: "docs"` 또는 `appId: "support-bot"`.',
+                '검색할 때 `appId`를 생략하면 해당 key 아래의 모든 appId를 검색합니다. 비어 있지 않은 appId를 전달하면 한 하위 공간만 검색하고, `appId=null` 또는 `appId=`는 기본/global 메모리만 검색합니다.',
+                'Console에서는 appId 필터, appId 열, memory 생성 시 appId 필드를 사용해 특정 애플리케이션의 메모리를 확인하거나 쓸 수 있습니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 6월 4일',
+          title: 'API 문서 개편 및 문서 안에서 API 테스트',
+          summary:
+            'mem9 API 레퍼런스가 더 명확한 레이아웃, 업데이트된 endpoint 설명, 내장 API 테스트 콘솔로 개편되었습니다. 개발자는 문서와 별도 도구를 오가지 않고 같은 페이지에서 문서를 읽고 요청을 시험할 수 있습니다.',
+          sections: [
+            {
+              title: '변경 내용',
+              items: [
+                'API 페이지의 사이드바와 endpoint 레이아웃이 더 명확해졌습니다.',
+                '인증, appId 격리, memory API, imports, session messages, Space Chain API 문서가 업데이트되었습니다.',
+              ],
+            },
+            {
+              title: '테스트 위치',
+              body: '사이트 내비게이션에서 API 페이지를 열고 API test 패널에서 base URL, API key, headers, path/query/body 필드를 설정한 뒤 요청을 실행하고 응답을 바로 확인할 수 있습니다.',
+            },
+          ],
+        },
+        {
+          date: '2026년 6월 3일',
+          title: '기존 mem9 API key를 Console로 가져오기',
+          summary:
+            'Agent 설치나 API 흐름에서 이미 mem9 API key를 받은 사용자는 이제 그 key를 Console의 Space에 연결할 수 있습니다. Console은 원본 key를 보호하고 마스킹된 정보만 보여 주며, claim된 key를 조직 quota 모델로 이동합니다.',
+          sections: [
+            {
+              title: 'Claim 흐름',
+              items: [
+                '설치 흐름의 claim 링크로 Console에 들어가거나 `/console/claim`을 직접 엽니다.',
+                '기존 key를 붙여넣고 조직과 프로젝트를 선택한 뒤 빈 Space에 연결하거나 흐름 안에서 새 Space를 만듭니다.',
+                '연결 후에는 원본 key를 일반 화면에 노출하지 않고 Console에서 Space를 관리할 수 있습니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 6월 3일',
+          title: '내장 결제, 결제 수단, 인보이스',
+          summary:
+            'Console의 Billing 영역에 Stripe 기반 결제 경험이 더 완성도 있게 들어갔습니다. 현재 플랜, 청구 주소, 결제 수단, 플랜 변경, 쿠폰, 구독 취소/재개, 인보이스 기록을 다룰 수 있습니다.',
+          sections: [
+            {
+              title: '관리 위치',
+              items: [
+                'Console을 열고 조직을 선택한 다음 Billing으로 이동합니다.',
+                'Upgrade 또는 Change plan에서 청구 정보를 입력하고 플랜을 선택한 뒤 Stripe Elements로 결제를 확인합니다.',
+                '같은 Billing 페이지에서 저장된 결제 수단과 인보이스를 확인합니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 6월 1일',
+          title: 'Space Chain 지식 라우팅',
+          summary:
+            'Space Chain은 이제 라우팅 정책 필드에 따라 추출된 지식을 올바른 Space Chain 노드에 쓸 수 있습니다. 넓은 범위의 입력을 적절한 팀, 프로젝트, 주제 Space에 저장하면서도 체인 전체 recall은 유지됩니다.',
+          sections: [
+            {
+              title: '라우팅 설정',
+              items: [
+                'Space Chain 상세 페이지를 열고 knowledge extraction policy를 설정합니다.',
+                '노드 선택기와 라우팅 다이어그램을 사용해 추출된 사실을 어디에 쓸지 결정합니다.',
+                'memory를 만들 때 smart ingest를 켜면 하나의 raw memory만 쓰는 대신 사실을 추출하고 라우팅합니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 6월 1일',
+          title: '서버 측 메모리 정렬과 검색 컨트롤',
+          summary:
+            'Memory 테이블은 이제 현재 페이지만이 아니라 서버의 전체 결과 집합에 대해 정렬과 필터를 적용합니다. 사용자는 내용, 유형, 태그, 업데이트 시간으로 정렬하고 검색 조건과 함께 사용할 수 있습니다.',
+          sections: [
+            {
+              title: '테이블 컨트롤',
+              items: [
+                'Space 또는 Space Chain memory workbench를 엽니다.',
+                '테이블 헤더를 클릭해 오름차순 또는 내림차순으로 정렬합니다.',
+                '내용, 유형, 태그 검색 필드를 사용하면 서버가 페이지네이션 전에 필터와 정렬을 적용합니다.',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      period: '2026년 5월',
+      items: [
+        {
+          date: '2026년 5월 30일',
+          title: '시간 표시가 포함된 더 빠른 Space Chain recall',
+          summary:
+            'Space Chain recall은 노드 스캔과 인증 해석을 병렬화하면서 글로벌 rerank 동작을 유지합니다. Console은 recall 소요 시간도 보여 주므로 팀이 테스트 쿼리 속도를 확인할 수 있습니다.',
+          sections: [
+            {
+              title: '변경 내용',
+              body: 'recall 작업은 백그라운드에서 병렬화되며 글로벌 rerank 동작은 그대로 유지됩니다.',
+            },
+            {
+              title: '검증 방법',
+              items: [
+                'Space Chain 상세 페이지를 열고 Recall test 패널을 사용합니다.',
+                '체인 전체 recall 동작을 테스트하려면 Force scanAll을 켭니다.',
+                '결과에 표시되는 경과 시간을 확인해 쿼리 성능을 비교합니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 5월 25일',
+          title: 'Session memory 관리와 일괄 정리',
+          summary:
+            'memory workbench에서 session memory 행을 나열하고 All, Insight, Pinned, Session으로 필터링하며, 행 선택, 페이지 크기 변경, 선택한 memories 일괄 삭제를 할 수 있습니다. API도 session 행 삭제와, 추출된 사실만 필요할 때 raw session 행을 저장하지 않는 요청 단위 스위치를 지원합니다.',
+          sections: [
+            {
+              title: 'Console 정리',
+              items: [
+                'Space memory workbench를 열고 memory type 필터를 선택합니다.',
+                '하나 이상의 행을 선택한 다음 툴바에서 선택한 memories를 삭제합니다.',
+              ],
+            },
+            {
+              title: 'API 옵션',
+              body: 'API ingest 흐름에서는 원본 session messages를 보존하지 않고 사실 추출만 원할 때 `disableSessionSave`를 설정합니다.',
+            },
+          ],
+        },
+        {
+          date: '2026년 5월 26일',
+          title: 'Console의 7개 언어 지원',
+          summary:
+            'Console은 영어, 중국어 간체, 중국어 번체, 일본어, 한국어, 인도네시아어, 태국어를 지원합니다. shell, 인증 페이지, Spaces, Memories, Settings, Project, Space Chain 흐름을 포함합니다.',
+          sections: [
+            {
+              title: '언어 전환',
+              items: [
+                'Console 헤더 또는 인증 페이지에서 언어 메뉴를 엽니다.',
+                '언어를 선택합니다. 선택은 로컬에 저장되고 문서 언어도 업데이트됩니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 5월 19일',
+          title: '결제와 사용량 대시보드',
+          summary:
+            '조직은 결제 플랜 상태, 권한, 요청 사용량 요약, 일별 rollup, 상세 사용 이벤트를 확인할 수 있습니다. runtime에는 quota gate와 지속 metering이 추가되어 self-hosted 동작을 바꾸지 않고 상업적 사용량을 추적할 수 있습니다.',
+          sections: [
+            {
+              title: '확인 위치',
+              items: [
+                'Console을 열고 조직을 선택합니다.',
+                'Billing에서 플랜과 entitlement 상태를 확인합니다.',
+                'Usage에서 선택한 날짜 범위의 memory recall 및 memory write 요청 합계를 확인합니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 5월 19일',
+          title: 'Space memory explorer와 runtime 도구',
+          summary:
+            'Spaces에는 summary metrics, imports, memory 목록/상세 조회, 생성/수정/삭제, 공유 Recall test 패널을 갖춘 memory workbench가 생겼습니다. 원본 API key는 서버 측에 유지되고 Console이 승인된 memory 작업을 프록시합니다.',
+          sections: [
+            {
+              title: '워크벤치 기능',
+              items: [
+                'Console에서 Space 상세 페이지를 엽니다.',
+                'Memories tab에서 memories를 탐색, 생성, 수정, 삭제합니다.',
+                'Recall test 패널로 해당 Space가 쿼리에 대해 무엇을 검색하는지 테스트합니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 5월 15일',
+          title: 'Space Chain runtime 지원',
+          summary:
+            'Space Chains는 이제 runtime에서 사용할 수 있으며, 순서 있는 recall과 write, chain key 인증, chain 응답의 provenance를 지원합니다. 하나의 chain key로 여러 Space에서 제어된 순서로 recall할 수 있습니다.',
+          sections: [
+            {
+              title: 'runtime 설정',
+              items: [
+                'Console에서 Space Chain을 만들거나 엽니다.',
+                'recall이 검색할 순서대로 Space 노드를 추가합니다.',
+                'chain key binding을 만들고 체인 전체 recall이 필요하면 해당 key와 `scanAll=true`를 사용합니다.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '2026년 5월 14일',
+          title: '더 안전한 Space API key 관리와 조직 역할',
+          summary:
+            'Space API keys는 암호화된 카탈로그에 저장되며 안정적인 마스킹 표시, 명시적인 reveal 흐름, active binding 검사를 제공합니다. 조직 역할은 owner, admin, member 권한을 구분합니다.',
+          sections: [
+            {
+              title: '권한',
+              items: [
+                'Owner와 admin은 Space key 관리 흐름에서 key를 만들고 연결하고 reveal할 수 있습니다.',
+                'Member는 허용된 리소스를 계속 읽을 수 있지만 변경 권한은 없습니다.',
+                '일반 화면에서는 마스킹된 key를 사용하고, 클라이언트에 복사해야 할 때만 reveal합니다.',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const releaseNotesPageCopyId = attachReleaseNoteSources({
+  meta: {
+    title: 'Catatan Rilis | mem9',
+    description: 'Catatan rilis mem9 untuk pelanggan, mencakup Console, API, Space Chain, billing, dan manajemen memori.',
+  },
+  kicker: 'Catatan Rilis',
+  title: 'Apa yang baru di mem9',
+  intro: 'Pembaruan penting terbaru dari para pembuat mem9.',
+  heroImageAlt: 'Ilustrasi catatan rilis mem9 dengan chip memori dan aliran data emas',
+  starPrompt: 'Proyek open-source tidak mudah dijalankan. Dukung kami dengan memberi Star untuk mem9 di GitHub.',
+  starBadgeAlt: 'GitHub stars untuk mem9-ai/mem9',
+  starBadgeSrc: 'https://img.shields.io/github/stars/mem9-ai/mem9?style=social',
+  starHref: 'https://github.com/mem9-ai/mem9',
+  updatedLabel: 'Terakhir diperbarui',
+  updatedValue: '4 Juni 2026',
+  sourcesLabel: 'Sumber PR',
+  sourcesFeedback: 'Silakan buka PR atau issue dan kirimkan masukan Anda.',
+  groups: [
+    {
+      period: 'Juni 2026',
+      items: [
+        {
+          date: '4 Juni 2026',
+          title: 'Pembaruan performa besar untuk mem9.ai',
+          summary:
+            'Layanan resmi mem9.ai sedang menerima pembaruan performa penting. Karena pilihan deployment awal, sebagian layanan dan database berjalan lintas region sehingga menambah latency yang tidak perlu. Kami memigrasikan data dalam dua fase untuk menurunkan latency API layanan hosted secara signifikan.',
+          sections: [
+            {
+              title: 'Rilis bertahap',
+              items: [
+                'Fase 1 dirilis pada siang hari waktu Beijing tanggal 4 Juni dan menurunkan latency API umum dari rata-rata sekitar 4-6 detik menjadi sekitar 1,3 detik.',
+                'Fase 2 ditargetkan selesai minggu ini untuk memigrasikan metadata, dengan target menurunkan latency rata-rata ke kisaran beberapa ratus milidetik.',
+              ],
+            },
+            {
+              title: 'Masukan',
+              body: 'Tidak ada perubahan sisi klien yang diperlukan. Pembaruan ini langsung memperbaiki jalur layanan hosted mem9.ai, dan masukan tentang performa layanan resmi sangat kami harapkan.',
+            },
+          ],
+        },
+        {
+          date: '4 Juni 2026',
+          title: 'Isolasi appId dalam satu API key',
+          summary:
+            'Satu mem9 API key sekarang dapat memuat beberapa ruang memori aplikasi yang terisolasi dengan `appId`. Memory dan raw session yang ditulis dengan appId akan tetap terhubung ke aplikasi tersebut, sehingga produk, Agent, environment, atau workflow berbeda dapat berbagi key yang sama tanpa mencampur memori harian.',
+          sections: [
+            {
+              title: 'Cara appId memisahkan memori',
+              items: [
+                'Saat menulis memory atau ingest messages, kirim `appId`, misalnya `appId: "docs"` atau `appId: "support-bot"`.',
+                'Saat mencari, kosongkan `appId` untuk mencari semua appId di bawah key tersebut, kirim appId non-kosong untuk mencari satu sub-ruang, atau kirim `appId=null` / `appId=` untuk mencari hanya memori default/global.',
+                'Di Console, gunakan filter appId, kolom appId, dan field appId saat membuat memory untuk melihat atau menulis memori milik aplikasi tertentu.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '4 Juni 2026',
+          title: 'Penyegaran API reference dengan uji API langsung',
+          summary:
+            'API reference mem9 diperbarui dengan layout yang lebih jelas, konten endpoint yang diperbarui, dan konsol uji API bawaan. Developer kini dapat membaca dokumentasi dan mencoba request di halaman yang sama tanpa berpindah ke tooling terpisah.',
+          sections: [
+            {
+              title: 'Yang berubah',
+              items: [
+                'Halaman API kini memiliki sidebar dan layout endpoint yang lebih jelas.',
+                'Konten dokumentasi diperbarui untuk authentication, appId isolation, memory APIs, imports, session messages, dan Space Chain APIs.',
+              ],
+            },
+            {
+              title: 'Tempat mencoba',
+              body: 'Buka halaman API dari navigasi situs, lalu gunakan panel API test untuk mengatur base URL, API key, headers, field path/query/body, menjalankan request, dan melihat response langsung di halaman dokumentasi.',
+            },
+          ],
+        },
+        {
+          date: '3 Juni 2026',
+          title: 'Impor mem9 API key yang sudah ada ke Console',
+          summary:
+            'Pengguna yang sudah menerima mem9 API key dari setup Agent atau flow API kini dapat mengaitkan key tersebut ke Space di Console. Console melindungi key mentah, hanya menampilkan detail yang disamarkan, dan memindahkan key yang sudah diklaim ke model quota organisasi.',
+          sections: [
+            {
+              title: 'Flow klaim',
+              items: [
+                'Buka flow klaim Console dari link setup, atau langsung buka `/console/claim`.',
+                'Tempel key yang sudah ada, pilih organisasi dan proyek, lalu kaitkan ke Space kosong atau buat Space baru di dalam flow.',
+                'Setelah dikaitkan, kelola Space dari Console tanpa menampilkan key mentah di tampilan biasa.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '3 Juni 2026',
+          title: 'Billing, metode pembayaran, dan invoice tertanam',
+          summary:
+            'Area Billing di Console kini memiliki pengalaman billing berbasis Stripe yang lebih lengkap: plan saat ini, alamat billing, metode pembayaran, kontrol perubahan plan, kupon, aksi cancel/resume, dan riwayat invoice.',
+          sections: [
+            {
+              title: 'Tempat mengelola',
+              items: [
+                'Buka Console, pilih organisasi, lalu masuk ke Billing.',
+                'Gunakan Upgrade atau Change plan untuk memasukkan detail billing, memilih plan, dan mengonfirmasi pembayaran dengan Stripe Elements.',
+                'Tinjau metode pembayaran tersimpan dan invoice dari halaman Billing yang sama.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '1 Juni 2026',
+          title: 'Routing knowledge di Space Chain',
+          summary:
+            'Space Chain kini dapat merutekan knowledge yang diekstrak ke node Space Chain yang tepat berdasarkan field routing policy. Chain bisa bertindak lebih seperti knowledgebase: ingest yang luas masuk ke Space tim, proyek, atau topik yang benar, sementara recall tetap bisa berjalan lintas chain.',
+          sections: [
+            {
+              title: 'Pengaturan routing',
+              items: [
+                'Buka halaman detail Space Chain dan konfigurasi knowledge extraction policy.',
+                'Gunakan node selector dan diagram routing untuk menentukan lokasi penulisan fakta yang diekstrak.',
+                'Saat membuat memory, aktifkan smart ingest agar sistem mengekstrak dan merutekan fakta, bukan hanya menulis satu item raw memory.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '1 Juni 2026',
+          title: 'Sorting memori sisi server dan kontrol pencarian',
+          summary:
+            'Tabel Memory sekarang melakukan sort dan filter terhadap seluruh hasil di server, bukan hanya halaman saat ini. Pengguna dapat sort berdasarkan content, type, tags, dan updated time sambil menggabungkannya dengan kontrol pencarian.',
+          sections: [
+            {
+              title: 'Kontrol tabel',
+              items: [
+                'Buka memory workbench untuk Space atau Space Chain.',
+                'Klik header tabel untuk mengurutkan naik atau turun.',
+                'Gunakan field pencarian untuk content, type, dan tags; server menerapkan filter dan sort sebelum pagination.',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      period: 'Mei 2026',
+      items: [
+        {
+          date: '30 Mei 2026',
+          title: 'Recall Space Chain lebih cepat dengan visibilitas waktu',
+          summary:
+            'Recall Space Chain kini memparalelkan pemindaian node dan penyelesaian auth, sambil mempertahankan perilaku reranking global. Console juga menampilkan timing recall agar tim dapat melihat durasi test recall.',
+          sections: [
+            {
+              title: 'Yang berubah',
+              body: 'Pekerjaan recall diparalelkan di belakang layar, sementara perilaku reranking global tetap sama.',
+            },
+            {
+              title: 'Cara memvalidasi',
+              items: [
+                'Buka halaman detail Space Chain dan gunakan panel Recall test.',
+                'Aktifkan Force scanAll jika ingin menguji perilaku recall lintas chain.',
+                'Periksa waktu yang ditampilkan bersama hasil untuk membandingkan performa query.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '25 Mei 2026',
+          title: 'Manajemen session memory dan pembersihan batch',
+          summary:
+            'Memory workbench kini dapat menampilkan row session memory, memfilter All, Insight, Pinned, atau Session, memilih row, mengubah page size, dan menghapus memories terpilih secara batch. API juga mendukung penghapusan session row dan switch per request untuk tidak menyimpan raw session saat hanya fakta hasil ekstraksi yang dibutuhkan.',
+          sections: [
+            {
+              title: 'Pembersihan di Console',
+              items: [
+                'Buka Space memory workbench dan pilih filter memory type.',
+                'Pilih satu atau beberapa row, lalu hapus memories terpilih dari toolbar.',
+              ],
+            },
+            {
+              title: 'Opsi API',
+              body: 'Untuk flow API ingest, set `disableSessionSave` saat Anda ingin ekstraksi fakta tanpa menyimpan raw session messages.',
+            },
+          ],
+        },
+        {
+          date: '26 Mei 2026',
+          title: 'Console mendukung tujuh bahasa',
+          summary:
+            'Console kini mendukung bahasa Inggris, Chinese Simplified, Chinese Traditional, Jepang, Korea, Indonesia, dan Thai di shell, halaman auth, Spaces, Memories, Settings, Project, dan flow Space Chain.',
+          sections: [
+            {
+              title: 'Pengalih bahasa',
+              items: [
+                'Buka menu bahasa di header Console atau halaman auth.',
+                'Pilih bahasa; pilihan disimpan secara lokal dan memperbarui bahasa dokumen.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '19 Mei 2026',
+          title: 'Dashboard billing dan usage',
+          summary:
+            'Organisasi dapat meninjau status plan billing, entitlements, ringkasan usage request, daily rollups, dan event usage terperinci. Runtime kini memiliki quota gate dan metering durable sehingga usage komersial dapat dilacak tanpa mengubah perilaku self-hosted.',
+          sections: [
+            {
+              title: 'Tempat melihat',
+              items: [
+                'Buka Console dan pilih organisasi.',
+                'Masuk ke Billing untuk meninjau status plan dan entitlement.',
+                'Masuk ke Usage untuk memeriksa total request memory recall dan memory write pada rentang tanggal yang dipilih.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '19 Mei 2026',
+          title: 'Space memory explorer dan runtime tools',
+          summary:
+            'Spaces kini memiliki memory workbench dengan summary metrics, imports, daftar/detail memory, kontrol create/edit/delete, dan panel Recall test bersama. Raw API key tetap berada di server sementara Console mem-proxy operasi memory yang sudah diotorisasi.',
+          sections: [
+            {
+              title: 'Alat workbench',
+              items: [
+                'Buka halaman detail Space di Console.',
+                'Gunakan tab Memories untuk menelusuri, membuat, mengedit, atau menghapus memories.',
+                'Gunakan panel Recall test untuk menguji apa yang akan diambil Space untuk sebuah query.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '15 Mei 2026',
+          title: 'Dukungan runtime Space Chain',
+          summary:
+            'Space Chains kini tersedia di runtime, dengan perilaku recall dan write berurutan, autentikasi chain key, dan provenance di response chain. Satu chain key dapat mengambil dari beberapa Space dalam urutan yang terkendali.',
+          sections: [
+            {
+              title: 'Pengaturan runtime',
+              items: [
+                'Buat atau buka Space Chain di Console.',
+                'Tambahkan node Space dalam urutan yang Anda inginkan untuk pencarian recall.',
+                'Buat chain key binding, lalu gunakan key tersebut dengan `scanAll=true` saat Anda ingin recall lintas chain.',
+              ],
+            },
+          ],
+        },
+        {
+          date: '14 Mei 2026',
+          title: 'Manajemen Space API key dan role organisasi yang lebih aman',
+          summary:
+            'Space API keys disimpan dalam katalog terenkripsi dengan nilai tampilan yang stabil dan tersamarkan, workflow reveal eksplisit, dan active binding checks. Role organisasi kini membedakan permission owner, admin, dan member untuk manajemen resource dan key.',
+          sections: [
+            {
+              title: 'Izin',
+              items: [
+                'Owner dan admin dapat membuat, bind, dan reveal Space keys dari flow manajemen Space key.',
+                'Member dapat tetap membaca resource yang diizinkan tanpa menerima permission mutasi.',
+                'Gunakan nilai key yang disamarkan di tampilan biasa; reveal key hanya saat perlu menyalinnya ke client.',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const releaseNotesPageCopyTh = attachReleaseNoteSources({
+  meta: {
+    title: 'บันทึกการเผยแพร่ | mem9',
+    description: 'บันทึกการเผยแพร่ของ mem9 สำหรับลูกค้า ครอบคลุม Console, API, Space Chain, billing และการจัดการ memory',
+  },
+  kicker: 'บันทึกการเผยแพร่',
+  title: 'มีอะไรใหม่ใน mem9',
+  intro: 'อัปเดตสำคัญล่าสุดจากผู้สร้าง mem9',
+  heroImageAlt: 'ภาพประกอบบันทึกการเผยแพร่ mem9 พร้อมชิปหน่วยความจำและสตรีมข้อมูลสีทอง',
+  starPrompt: 'การทำโปรเจกต์ open-source ไม่ง่าย โปรดช่วยสนับสนุนเราด้วยการกด Star ให้ mem9 บน GitHub',
+  starBadgeAlt: 'GitHub stars สำหรับ mem9-ai/mem9',
+  starBadgeSrc: 'https://img.shields.io/github/stars/mem9-ai/mem9?style=social',
+  starHref: 'https://github.com/mem9-ai/mem9',
+  updatedLabel: 'อัปเดตล่าสุด',
+  updatedValue: '4 มิถุนายน 2026',
+  sourcesLabel: 'แหล่งที่มา PR',
+  sourcesFeedback: 'ยินดีให้คุณเข้าไปที่ PR หรือ issue แล้วส่งความคิดเห็นมาให้เรา',
+  groups: [
+    {
+      period: 'มิถุนายน 2026',
+      items: [
+        {
+          date: '4 มิถุนายน 2026',
+          title: 'การอัปเดตประสิทธิภาพครั้งสำคัญสำหรับ mem9.ai',
+          summary:
+            'บริการทางการของ mem9.ai กำลังได้รับการปรับปรุงประสิทธิภาพครั้งสำคัญ เนื่องจากการ deploy ช่วงแรกทำให้บางส่วนของ service และ database อยู่คนละ region จึงเกิด latency ที่ไม่จำเป็น เรากำลังย้ายข้อมูลเป็น 2 เฟสเพื่อลด API latency ของ hosted service อย่างชัดเจน',
+          sections: [
+            {
+              title: 'แผนการเผยแพร่',
+              items: [
+                'เฟส 1 เผยแพร่ตอนเที่ยงตามเวลา Beijing วันที่ 4 มิถุนายน และลด API latency ทั่วไปจากเฉลี่ยประมาณ 4-6 วินาที เหลือประมาณ 1.3 วินาที',
+                'เฟส 2 คาดว่าจะเสร็จภายในสัปดาห์นี้ โดยจะย้าย metadata และมีเป้าหมายให้ latency เฉลี่ยลดลงมาอยู่ในระดับไม่กี่ร้อยมิลลิวินาที',
+              ],
+            },
+            {
+              title: 'ข้อเสนอแนะ',
+              body: 'ไม่ต้องแก้ไขฝั่ง client การอัปเดตนี้ปรับปรุงเส้นทางของ hosted mem9.ai service โดยตรง เรายินดีรับความคิดเห็นเกี่ยวกับประสิทธิภาพของบริการทางการ',
+            },
+          ],
+        },
+        {
+          date: '4 มิถุนายน 2026',
+          title: 'แยก appId ภายใต้ API key เดียว',
+          summary:
+            'ตอนนี้ mem9 API key เดียวสามารถมีพื้นที่ memory ของหลายแอปที่แยกกันด้วย `appId` ได้ Memory และ raw session ที่เขียนพร้อม appId จะผูกกับแอปนั้น จึงเหมาะกับการใช้ key เดียวกับหลาย product, Agent, environment หรือ workflow โดยไม่ให้ memory ประจำวันปะปนกัน',
+          sections: [
+            {
+              title: 'appId แยก memory อย่างไร',
+              items: [
+                'เมื่อเขียน memory หรือ ingest messages ให้ส่ง `appId` เช่น `appId: "docs"` หรือ `appId: "support-bot"`',
+                'ตอน search ถ้าไม่ส่ง `appId` จะค้นหาข้ามทุก appId ภายใต้ key นั้น ถ้าส่ง appId ที่ไม่ว่างจะค้นหาเฉพาะ sub-space นั้น และถ้าส่ง `appId=null` หรือ `appId=` จะค้นหาเฉพาะ default/global memory',
+                'ใน Console ใช้ appId filter, appId column และ field appId ตอนสร้าง memory เพื่อดูหรือเขียน memory สำหรับแอปเฉพาะ',
+              ],
+            },
+          ],
+        },
+        {
+          date: '4 มิถุนายน 2026',
+          title: 'เอกสารอ้างอิง API ใหม่พร้อมทดสอบ API ในหน้าเอกสาร',
+          summary:
+            'mem9 API reference ได้รับการปรับปรุง layout ให้ชัดเจนขึ้น อัปเดตเนื้อหา endpoint และเพิ่ม API test console ในตัว Developer จึงอ่านเอกสารและลอง request ได้ในหน้าเดียว ไม่ต้องสลับไปใช้เครื่องมือแยกต่างหาก',
+          sections: [
+            {
+              title: 'สิ่งที่เปลี่ยน',
+              items: [
+                'หน้า API มี sidebar และ layout endpoint ที่ชัดเจนขึ้น',
+                'อัปเดตเนื้อหาสำหรับ authentication, appId isolation, memory APIs, imports, session messages และ Space Chain APIs',
+              ],
+            },
+            {
+              title: 'ลองได้ที่ไหน',
+              body: 'เปิดหน้า API จาก navigation ของ site แล้วใช้ API test panel ตั้งค่า base URL, API key, headers, field path/query/body, run request และดู response ได้ในหน้าเอกสารโดยตรง',
+            },
+          ],
+        },
+        {
+          date: '3 มิถุนายน 2026',
+          title: 'นำ mem9 API key ที่มีอยู่เข้า Console',
+          summary:
+            'ผู้ใช้ที่ได้รับ mem9 API key จากการติดตั้ง Agent หรือ flow API แล้ว ตอนนี้สามารถผูก key นั้นกับ Space ใน Console ได้ Console จะปกป้อง raw key แสดงเฉพาะข้อมูลที่ mask แล้ว และย้าย claimed key เข้า model quota ขององค์กร',
+          sections: [
+            {
+              title: 'ขั้นตอนการรับสิทธิ์',
+              items: [
+                'เปิด Console claim flow จากลิงก์ใน setup หรือเปิด `/console/claim` โดยตรง',
+                'วาง key ที่มีอยู่ เลือก organization และ project แล้วผูกกับ Space ว่าง หรือสร้าง Space ใหม่ใน flow',
+                'หลัง bind แล้วสามารถจัดการ Space จาก Console ได้โดยไม่เปิดเผย raw key ในหน้าทั่วไป',
+              ],
+            },
+          ],
+        },
+        {
+          date: '3 มิถุนายน 2026',
+          title: 'Billing, payment methods และ invoices ในตัว',
+          summary:
+            'พื้นที่ Billing ใน Console มีประสบการณ์ billing ที่ครบขึ้นบน Stripe: plan ปัจจุบัน billing address, payment methods, การเปลี่ยน plan, coupons, cancel/resume และประวัติ invoice',
+          sections: [
+            {
+              title: 'จัดการที่ไหน',
+              items: [
+                'เปิด Console เลือก organization แล้วไปที่ Billing',
+                'ใช้ Upgrade หรือ Change plan เพื่อกรอก billing details เลือก plan และยืนยัน payment ด้วย Stripe Elements',
+                'ตรวจ payment methods ที่บันทึกไว้และ invoices ได้จากหน้า Billing เดียวกัน',
+              ],
+            },
+          ],
+        },
+        {
+          date: '1 มิถุนายน 2026',
+          title: 'Knowledge routing ใน Space Chain',
+          summary:
+            'Space Chain สามารถ route knowledge ที่ extract แล้วไปยัง node ที่ถูกต้องตาม routing policy fields ได้ ทำให้ chain ทำงานเหมือน knowledgebase มากขึ้น: ingest กว้าง ๆ จะลง Space ของทีม โปรเจกต์ หรือหัวข้อที่เหมาะสม ขณะที่ recall ยังค้นข้าม chain ได้',
+          sections: [
+            {
+              title: 'ตั้งค่า routing',
+              items: [
+                'เปิดหน้า detail ของ Space Chain แล้วตั้งค่า knowledge extraction policy',
+                'ใช้ node selector และ routing diagram เพื่อกำหนดว่าข้อเท็จจริงที่ extract แล้วควรถูกเขียนไปที่ไหน',
+                'ตอนสร้าง memory ให้เปิด smart ingest เพื่อ extract และ route facts แทนการเขียน raw memory item เพียงรายการเดียว',
+              ],
+            },
+          ],
+        },
+        {
+          date: '1 มิถุนายน 2026',
+          title: 'การจัดเรียง memory และ search controls ฝั่ง server',
+          summary:
+            'ตาราง Memory ตอนนี้ sort และ filter กับ result set ทั้งหมดบน server ไม่ใช่แค่หน้าปัจจุบัน ผู้ใช้สามารถ sort ตาม content, type, tags และ updated time พร้อมใช้ร่วมกับ search controls ได้',
+          sections: [
+            {
+              title: 'ตัวควบคุมตาราง',
+              items: [
+                'เปิด memory workbench ของ Space หรือ Space Chain',
+                'คลิก header ของตารางเพื่อ sort ascending หรือ descending',
+                'ใช้ search fields สำหรับ content, type และ tags โดย server จะ filter และ sort ก่อน pagination',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      period: 'พฤษภาคม 2026',
+      items: [
+        {
+          date: '30 พฤษภาคม 2026',
+          title: 'Space Chain recall เร็วขึ้นพร้อมการแสดงเวลา',
+          summary:
+            'Space Chain recall ตอนนี้ parallelize การ scan node และ auth resolution พร้อมคง global reranking behavior ไว้ Console ยังแสดง recall timing เพื่อให้ทีมเห็นว่า test recall ใช้เวลานานแค่ไหน',
+          sections: [
+            {
+              title: 'สิ่งที่เปลี่ยน',
+              body: 'งาน recall ถูก parallelize อยู่เบื้องหลัง โดยยังคง global reranking behavior เดิม',
+            },
+            {
+              title: 'วิธีตรวจสอบ',
+              items: [
+                'เปิดหน้า detail ของ Space Chain แล้วใช้ Recall test panel',
+                'เปิด Force scanAll เมื่ออยากทดสอบพฤติกรรม cross-chain recall',
+                'ดู elapsed time ที่แสดงพร้อม result เพื่อเปรียบเทียบ query performance',
+              ],
+            },
+          ],
+        },
+        {
+          date: '25 พฤษภาคม 2026',
+          title: 'จัดการ session memory และ batch cleanup',
+          summary:
+            'memory workbench สามารถ list session memory rows, filter ตาม All, Insight, Pinned หรือ Session, เลือก rows, เปลี่ยน page size และลบ memories ที่เลือกแบบ batch ได้ API ยังรองรับการลบ session-row และ request-level switch เพื่อไม่บันทึก raw session rows เมื่อจำเป็นต้องใช้แค่ facts ที่ extract แล้ว',
+          sections: [
+            {
+              title: 'การล้างข้อมูลใน Console',
+              items: [
+                'เปิด Space memory workbench แล้วเลือก memory type filter',
+                'เลือกหนึ่งหรือหลาย rows แล้วลบ memories ที่เลือกจาก toolbar',
+              ],
+            },
+            {
+              title: 'ตัวเลือก API',
+              body: 'สำหรับ API ingest flows ให้ตั้ง `disableSessionSave` เมื่ออยาก extract facts โดยไม่เก็บ raw session messages',
+            },
+          ],
+        },
+        {
+          date: '26 พฤษภาคม 2026',
+          title: 'Console รองรับเจ็ดภาษา',
+          summary:
+            'Console รองรับ English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Indonesian และ Thai ครอบคลุม shell, auth pages, Spaces, Memories, Settings, Project และ Space Chain flows',
+          sections: [
+            {
+              title: 'ตัวเลือกภาษา',
+              items: [
+                'เปิด language menu ใน Console header หรือ auth page',
+                'เลือกภาษา ระบบจะบันทึกไว้ในเครื่องและอัปเดต document language',
+              ],
+            },
+          ],
+        },
+        {
+          date: '19 พฤษภาคม 2026',
+          title: 'Billing และ usage dashboards',
+          summary:
+            'องค์กรสามารถดู billing plan state, entitlements, request usage summaries, daily rollups และ detailed usage events ได้ Runtime มี quota gates และ durable metering เพื่อ track commercial usage โดยไม่เปลี่ยน self-hosted behavior',
+          sections: [
+            {
+              title: 'ดูได้ที่ไหน',
+              items: [
+                'เปิด Console แล้วเลือก organization',
+                'ไปที่ Billing เพื่อดู plan และ entitlement state',
+                'ไปที่ Usage เพื่อตรวจยอด memory recall และ memory write request ในช่วงวันที่ที่เลือก',
+              ],
+            },
+          ],
+        },
+        {
+          date: '19 พฤษภาคม 2026',
+          title: 'Space memory explorer และ runtime tools',
+          summary:
+            'Spaces มี memory workbench พร้อม summary metrics, imports, memory list/detail, create/edit/delete controls และ shared Recall test panel Raw API keys ยังอยู่ฝั่ง server ขณะที่ Console proxy memory operations ที่ authorize แล้ว',
+          sections: [
+            {
+              title: 'เครื่องมือ workbench',
+              items: [
+                'เปิดหน้า detail ของ Space ใน Console',
+                'ใช้ Memories tab เพื่อ browse, create, edit หรือ delete memories',
+                'ใช้ Recall test panel เพื่อทดสอบว่า Space จะ retrieve อะไรสำหรับ query หนึ่ง',
+              ],
+            },
+          ],
+        },
+        {
+          date: '15 พฤษภาคม 2026',
+          title: 'รองรับ Space Chain runtime',
+          summary:
+            'Space Chains ใช้งานใน runtime ได้แล้ว พร้อม ordered recall/write behavior, chain key authentication และ provenance ใน chain responses ทำให้ chain key เดียว retrieve จากหลาย Space ตามลำดับที่ควบคุมได้',
+          sections: [
+            {
+              title: 'การตั้งค่า runtime',
+              items: [
+                'สร้างหรือเปิด Space Chain ใน Console',
+                'เพิ่ม Space nodes ตามลำดับที่อยากให้ recall ค้นหา',
+                'สร้าง chain key binding แล้วใช้ key นั้นพร้อม `scanAll=true` เมื่อต้องการ recall ข้าม chain',
+              ],
+            },
+          ],
+        },
+        {
+          date: '14 พฤษภาคม 2026',
+          title: 'จัดการ Space API key และ organization roles ให้ปลอดภัยขึ้น',
+          summary:
+            'Space API keys ถูกเก็บใน encrypted catalog พร้อม masked display values ที่เสถียร, explicit reveal workflows และ active binding checks Organization roles แยก owner, admin และ member permissions สำหรับ resource และ key management',
+          sections: [
+            {
+              title: 'สิทธิ์',
+              items: [
+                'Owner และ admin สามารถ create, bind และ reveal Space keys จาก Space key management flow',
+                'Member ยังอ่าน resources ที่ได้รับอนุญาตได้ แต่ไม่มี mutation permissions',
+                'ใช้ masked key values ในมุมมองทั่วไป และ reveal key เฉพาะตอนต้อง copy ไปยัง client',
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const releaseNotesPageCopyByLocale: Record<SiteLocale, SiteReleaseNotesPageCopy> = {
+  en: releaseNotesPageCopyEn,
+  zh: releaseNotesPageCopyZh,
+  'zh-Hant': releaseNotesPageCopyZhHant,
+  ja: releaseNotesPageCopyJa,
+  ko: releaseNotesPageCopyKo,
+  id: releaseNotesPageCopyId,
+  th: releaseNotesPageCopyTh,
+};
+
+const apiSharedTextTranslations: Partial<Record<SiteLocale, Record<string, string>>> = {
+  zh: {
+    'mem9 API key for your space.': '你的 mem9 space API key。',
+    'Optional agent identity header for attribution.': '可选的 agent 身份 header，用于归因。',
+    'Set to `application/json` for JSON request bodies.': '发送 JSON 请求体时设为 `application/json`。',
+    'Optional version guard for optimistic updates.': '可选的版本保护，用于乐观更新。',
+    'Your HTTP client sends this as `multipart/form-data`.': '由你的 HTTP 客户端以 `multipart/form-data` 发送。',
+    'Active Space Chain API key for this chain.': '这条 Space Chain 当前可用的 API key。',
+    'Plain memory content for direct writes. Required when `messages` is absent.': '直接写入的纯文本记忆内容。未提供 `messages` 时必填。',
+    'Conversation messages for ingest-based writes. Required when `content` is absent.': '用于 ingest 写入的对话消息。未提供 `content` 时必填。',
+    'Optional application isolation id, max 100 characters. Omitted, null, empty, or whitespace values write to the default/global appId; non-empty values are trimmed and stored exactly.': '可选的应用隔离 id，最多 100 个字符。省略、null、空字符串或纯空白会写入默认/global appId；非空值会 trim 后原样保存。',
+    'Only accepted with `content` writes. Use `insight` or `pinned`; defaults to `insight`.': '仅在 `content` 写入时可用。使用 `insight` 或 `pinned`；默认是 `insight`。',
+    'Optional agent id to store with the write.': '可选的 agent id，会随本次写入保存。',
+    'Optional session id for ingest or attribution.': '可选的 session id，用于 ingest 或归因。',
+    'Optional string tags stored on the memory.': '可选的字符串标签，会保存到记忆上。',
+    'Optional JSON metadata payload.': '可选的 JSON metadata 载荷。',
+    'Ingest mode such as `smart` or `raw` when using `messages`.': '使用 `messages` 时的 ingest 模式，例如 `smart` 或 `raw`。',
+    'When true, wait for completion before returning.': '为 true 时等待处理完成后再返回。',
+    'Message ingest only. When true, skip raw session persistence and only extract/reconcile facts.': '仅用于 message ingest。为 true 时跳过原始 session 持久化，只提取/合并 facts。',
+    'Search query. Omit to list memories by filters.': '搜索查询。省略时按过滤条件列出 memories。',
+    'Optional search behavior. Use `keyword` for direct content substring matching in list UIs; omit it for the default recall-style search.': '可选搜索行为。列表 UI 中使用 `keyword` 做 content 子串匹配；省略时使用默认 recall 风格搜索。',
+    'Comma-separated tag filter.': '逗号分隔的 tag 过滤器。',
+    'Filter by stored source value.': '按已保存的 source 值过滤。',
+    'Filter by lifecycle state such as `active` or `archived`.': '按生命周期状态过滤，例如 `active` 或 `archived`。',
+    'Filter by `insight`, `pinned`, or `session`.': '按 `insight`、`pinned` 或 `session` 过滤。',
+    'Filter by agent id.': '按 agent id 过滤。',
+    'Filter by session id.': '按 session id 过滤。',
+    'Optional appId filter. Omit to search all appIds, pass a value for exact isolation, or use `appId=null` / `appId=` for default/global.': '可选 appId 过滤器。省略表示搜索全部 appId，传值表示精确隔离，使用 `appId=null` / `appId=` 表示默认/global。',
+    'Page size. The handler caps large values.': '分页大小。服务端会限制过大的值。',
+    'Offset for pagination.': '分页 offset。',
+    'Sort field used when listing memories, such as `updated_at`.': '列出 memories 时使用的排序字段，例如 `updated_at`。',
+    'Sort direction, `asc` or `desc`.': '排序方向，`asc` 或 `desc`。',
+    'Space Chain keys only. When true, recall searches every node and globally reranks the merged facts.': '仅 Space Chain key 可用。为 true 时 recall 会搜索所有节点，并对合并后的 facts 做全局 rerank。',
+    'Updated memory content.': '更新后的记忆内容。',
+    'Updated tag array.': '更新后的 tag 数组。',
+    'Updated JSON metadata payload.': '更新后的 JSON metadata 载荷。',
+    'Array of memory ids to delete.': '要删除的 memory id 数组。',
+    'Uploaded file payload.': '上传的文件载荷。',
+    'Use `memory` or `session`.': '使用 `memory` 或 `session`。',
+    'Optional agent id for attribution.': '可选的 agent id，用于归因。',
+    'Required when uploading `session` files.': '上传 `session` 文件时必填。',
+    'Optional top-level appId inside JSON memory/session files.': 'JSON memory/session 文件中的可选顶层 appId。',
+    'Optional per-memory appId override inside JSON memory files.': 'JSON memory 文件中每条 memory 可选的 appId 覆盖值。',
+    'Optional per-session appId override inside JSON session files.': 'JSON session 文件中每个 session 可选的 appId 覆盖值。',
+    'Repeat this query param for each session to fetch.': '每个要获取的 session 都重复传入这个查询参数。',
+    'Optional per-session row limit.': '可选的每个 session 行数限制。',
+    'The newly provisioned mem9 API key / space identifier.': '新创建的 mem9 API key / space 标识符。',
+    'Health status string. Hosted service returns `ok`.': '健康状态字符串。托管服务返回 `ok`。',
+    'Go runtime version used by the server.': '服务端使用的 Go runtime 版本。',
+    'Server start timestamp.': '服务启动时间戳。',
+    '`active` when the key can be used, otherwise `inactive`.': 'key 可用时为 `active`，否则为 `inactive`。',
+    'Array of memory objects for the current page.': '当前页的 memory object 数组。',
+    'Total matched rows before pagination.': '分页前匹配的总行数。',
+    'Applied page size.': '实际应用的分页大小。',
+    'Applied page offset.': '实际应用的分页 offset。',
+    'Memory id.': 'Memory id。',
+    'Stored memory content.': '已保存的 memory 内容。',
+    'Memory type such as `insight`, `pinned`, or `session`.': 'Memory 类型，例如 `insight`、`pinned` 或 `session`。',
+    'Application isolation id. Empty string means default/global.': '应用隔离 id。空字符串表示默认/global。',
+    'Stored source value when present.': '存在时表示已保存的 source 值。',
+    'String tag array when present.': '存在时表示字符串 tag 数组。',
+    'Raw JSON metadata when present.': '存在时表示原始 JSON metadata。',
+    'Agent id associated with the memory when present.': '存在时表示与该 memory 关联的 agent id。',
+    'Session id associated with the memory when present.': '存在时表示与该 memory 关联的 session id。',
+    'Agent or actor that last updated the memory when present.': '存在时表示最后更新该 memory 的 agent 或 actor。',
+    'Replacement memory id when this memory has been superseded.': '当该 memory 被替代时，指向替代 memory id。',
+    'Lifecycle state.': '生命周期状态。',
+    'Current integer version.': '当前整数版本。',
+    'Creation timestamp.': '创建时间戳。',
+    'Last update timestamp.': '最后更新时间戳。',
+    'Search relevance score when returned by search endpoints.': '搜索 endpoint 返回时的相关性分数。',
+    'Recall confidence score when returned by recall-style search.': 'recall 风格搜索返回时的置信度分数。',
+    'Human-readable recency string populated for query-time search results.': '查询时搜索结果中的人类可读时间新近程度。',
+    'Handler result such as `ok` or `accepted`.': 'Handler 结果，例如 `ok` 或 `accepted`。',
+    'Task id for polling.': '用于轮询的 task id。',
+    'Initial task status such as `pending`.': '初始 task 状态，例如 `pending`。',
+    'Aggregate task status for the tenant.': 'tenant 下的聚合 task 状态。',
+    'Array of import task summaries.': 'import task 摘要数组。',
+    'Task id.': 'Task id。',
+    'Uploaded file name.': '上传文件名。',
+    'Task status.': 'Task 状态。',
+    'Total chunk count.': '总 chunk 数。',
+    'Completed chunk count.': '已完成 chunk 数。',
+    'Error message when the task fails.': 'task 失败时的错误消息。',
+    'Array of captured session message rows.': '捕获到的 session message 行数组。',
+    'Session message row id.': 'Session message 行 id。',
+    'Session id for the row.': '该行的 session id。',
+    'Agent id for the row when present.': '存在时表示该行的 agent id。',
+    'Application isolation id for each raw session row.': '每条 raw session 行的应用隔离 id。',
+    'Sequence number within the session.': 'session 内的序号。',
+    'Message role such as `user` or `assistant`.': '消息角色，例如 `user` 或 `assistant`。',
+    'Message content.': '消息内容。',
+    'Content type for the captured message.': '捕获消息的 content type。',
+    'Captured tags for the row.': '该行捕获到的 tags。',
+    'Lifecycle state for the row.': '该行的生命周期状态。',
+    'Applied per-session limit.': '实际应用的每 session 限制。',
+    'Validate whether a Space key or Space Chain key is currently usable before making runtime calls.': '在发起 runtime 调用前，验证 Space key 或 Space Chain key 当前是否可用。',
+    'Check API key status.': '检查 API key 状态。',
+    'Send either a normal mem9 Space key or a Space Chain key in `X-API-Key`. The response is `active` or `inactive`; unknown keys return `404`.': '在 `X-API-Key` 中发送普通 mem9 Space key 或 Space Chain key。响应为 `active` 或 `inactive`；未知 key 返回 `404`。',
+    'Space API key or Space Chain API key.': 'Space API key 或 Space Chain API key。',
+    'Check Space key': '检查 Space key',
+    'Check Space Chain key': '检查 Space Chain key',
+    'Delete multiple memories.': '批量删除 memories。',
+    'Deletes the provided memory ids in one request. When authenticated with a Space Chain key, the handler resolves each id to the node that owns it.': '在一个请求中删除给定的 memory ids。使用 Space Chain key 认证时，handler 会将每个 id 解析到拥有它的节点。',
+    'Batch delete memories': '批量删除 memories',
+    'Space Chains': 'Space Chains',
+    'Create and manage ordered chains of Spaces. Runtime memory endpoints accept a Space Chain key and search the chain in node order, or all nodes when `scanAll=true`.': '创建和管理有序 Space 链。Runtime memory endpoint 可接受 Space Chain key，并按节点顺序搜索 chain；`scanAll=true` 时搜索所有节点。',
+    'Create a Space Chain.': '创建 Space Chain。',
+    'Creates a Space Chain and returns its first plaintext chain key once. Store `chain_api_key` securely; later list responses only expose masked or bound key records.': '创建 Space Chain，并且只返回一次首个明文 chain key。请安全保存 `chain_api_key`；后续列表响应只会暴露脱敏或绑定记录。',
+    'Create Space Chain': '创建 Space Chain',
+    'Export Space Chain env vars': '导出 Space Chain 环境变量',
+    'Read the Space Chain for a key.': '读取某个 key 对应的 Space Chain。',
+    'Looks up the active Space Chain associated with the `X-API-Key` chain key.': '查找与 `X-API-Key` chain key 关联的 active Space Chain。',
+    'Get by key': '按 key 获取',
+    'Read one Space Chain.': '读取单个 Space Chain。',
+    'Returns chain metadata, nodes, and bindings for a chain key authorized to manage this Space Chain.': '返回该管理 key 有权管理的 Space Chain metadata、nodes 和 bindings。',
+    'Get Space Chain': '获取 Space Chain',
+    'Update Space Chain details.': '更新 Space Chain 详情。',
+    'Updates the display name and description for a Space Chain.': '更新 Space Chain 的显示名称和描述。',
+    'Update Space Chain': '更新 Space Chain',
+    'Delete a Space Chain.': '删除 Space Chain。',
+    'Soft-deletes the Space Chain. A successful delete returns `204 No Content`.': '软删除 Space Chain。删除成功时返回 `204 No Content`。',
+    'Delete Space Chain': '删除 Space Chain',
+    'List Space Chain nodes.': '列出 Space Chain 节点。',
+    'Returns the ordered node list. Node positions are zero-based and define sequential recall order.': '返回有序节点列表。节点 position 从 0 开始，并定义顺序 recall 的访问顺序。',
+    'List nodes': '列出节点',
+    'Replace Space Chain nodes.': '替换 Space Chain 节点。',
+    'Replaces the entire ordered node list. Each node must reference a normal Space key / tenant id, not another Space Chain key.': '替换整个有序节点列表。每个节点必须引用普通 Space key / tenant id，不能引用另一个 Space Chain key。',
+    'Replace nodes': '替换节点',
+    'Update a Space Chain knowledge extraction policy.': '更新 Space Chain 知识抽取策略。',
+    'Configures a non-first target node for smart ingest routing. The node must have a non-empty `external_space_id`; nodes without one are not eligible routing targets. mem9 evaluates the natural-language prompt against each extracted fact and routes matching facts to this node. This policy controls extracted-fact writes; it does not filter recall queries.':
+      '为非首节点配置 smart ingest 路由。节点必须具有非空的 `external_space_id`；缺少该字段的节点不会成为路由目标。mem9 会用自然语言 prompt 判断每条抽取出的事实，并将匹配事实路由到该节点。该策略控制抽取事实的写入，不会过滤 recall 查询。',
+    'Space Chain id.': 'Space Chain id。',
+    'Target node id. The first node cannot have a routing policy.': '目标节点 id。首节点不能配置 routing policy。',
+    'Whether this node participates in knowledge extraction routing.': '该节点是否参与知识抽取路由。',
+    'Natural-language matching rule. Required when enabled is true; maximum 1,200 characters.':
+      '自然语言匹配规则。enabled 为 true 时必填，最多 1,200 个字符。',
+    'When true, matching facts are emitted through Space Chain webhooks but are not saved directly into the target Space.':
+      '为 true 时，匹配事实会通过 Space Chain webhook 发出，但不会直接保存到目标 Space。',
+    'Space Chain node id.': 'Space Chain 节点 id。',
+    'Target Space API key / tenant id.': '目标 Space API key / tenant id。',
+    'Console Space id used as the routing target identifier when present.': '存在时作为路由目标标识符使用的 Console Space id。',
+    'Display name for the target Space when present.': '存在时表示目标 Space 的显示名称。',
+    'Zero-based node position.': '从 0 开始的节点位置。',
+    'Whether knowledge extraction routing is enabled.': '知识抽取路由是否启用。',
+    'Natural-language matching rule when configured.': '已配置的自然语言匹配规则。',
+    'Whether matching facts are delivered only through Space Chain webhooks.':
+      '匹配事实是否只通过 Space Chain webhook 投递。',
+    'Configure knowledge extraction routing': '配置知识抽取路由',
+    'List Space Chain key bindings.': '列出 Space Chain key bindings。',
+    'Returns all key bindings visible to the management key for this Space Chain.': '返回该 Space Chain 管理 key 可见的全部 key bindings。',
+    'List bindings': '列出 bindings',
+    'Create a Space Chain key binding.': '创建 Space Chain key binding。',
+    'Creates another chain key. Omit `chain_api_key` to let mem9 generate a key.': '创建另一个 chain key。省略 `chain_api_key` 时由 mem9 生成 key。',
+    'Create binding': '创建 binding',
+    'Disable a Space Chain key binding.': '禁用 Space Chain key binding。',
+    'Disables an active binding. The API rejects disabling the last active key for a chain.': '禁用一个 active binding。API 会拒绝禁用某条 chain 的最后一个 active key。',
+    'Disable binding': '禁用 binding',
+    'Recall across a Space Chain.': '跨 Space Chain recall。',
+    'Use the normal memory search endpoint with a Space Chain key. By default recall visits nodes in order and stops early on high confidence; pass `scanAll=true` to search every node and globally rerank.': '使用普通 memory search endpoint，但传入 Space Chain key。默认 recall 会按顺序访问节点，并在高置信结果处提前停止；传 `scanAll=true` 时搜索所有节点并全局 rerank。',
+    'Recall with scanAll': '使用 scanAll recall',
+    'Check server version metadata.': '检查 server 版本 metadata。',
+    'Returns runtime metadata that is useful for support and deployment verification.': '返回对支持和部署验证有用的 runtime metadata。',
+    'Version check': '版本检查',
+  },
+  'zh-Hant': {
+    'Update a Space Chain knowledge extraction policy.': '更新 Space Chain 知識擷取策略。',
+    'Configures a non-first target node for smart ingest routing. The node must have a non-empty `external_space_id`; nodes without one are not eligible routing targets. mem9 evaluates the natural-language prompt against each extracted fact and routes matching facts to this node. This policy controls extracted-fact writes; it does not filter recall queries.':
+      '為非首節點設定 smart ingest 路由。節點必須有非空的 `external_space_id`；缺少此欄位的節點不會成為路由目標。mem9 會用自然語言 prompt 判斷每筆擷取出的事實，並將符合的事實路由到此節點。此策略控制擷取事實的寫入，不會篩選 recall 查詢。',
+    'Space Chain id.': 'Space Chain id。',
+    'Target node id. The first node cannot have a routing policy.': '目標節點 id。第一個節點不能設定 routing policy。',
+    'Whether this node participates in knowledge extraction routing.': '此節點是否參與知識擷取路由。',
+    'Natural-language matching rule. Required when enabled is true; maximum 1,200 characters.':
+      '自然語言匹配規則。enabled 為 true 時必填，最多 1,200 個字元。',
+    'When true, matching facts are emitted through Space Chain webhooks but are not saved directly into the target Space.':
+      '為 true 時，符合的事實會透過 Space Chain webhook 發送，但不會直接儲存到目標 Space。',
+    'Space Chain node id.': 'Space Chain 節點 id。',
+    'Target Space API key / tenant id.': '目標 Space API key / tenant id。',
+    'Console Space id used as the routing target identifier when present.': '存在時作為路由目標識別碼使用的 Console Space id。',
+    'Display name for the target Space when present.': '存在時表示目標 Space 的顯示名稱。',
+    'Zero-based node position.': '從 0 開始的節點位置。',
+    'Whether knowledge extraction routing is enabled.': '知識擷取路由是否啟用。',
+    'Natural-language matching rule when configured.': '已設定的自然語言匹配規則。',
+    'Whether matching facts are delivered only through Space Chain webhooks.':
+      '符合的事實是否只透過 Space Chain webhook 傳送。',
+    'Configure knowledge extraction routing': '設定知識擷取路由',
+  },
+  ja: {
+    'Update a Space Chain knowledge extraction policy.': 'Space Chain の知識抽出ポリシーを更新します。',
+    'Configures a non-first target node for smart ingest routing. The node must have a non-empty `external_space_id`; nodes without one are not eligible routing targets. mem9 evaluates the natural-language prompt against each extracted fact and routes matching facts to this node. This policy controls extracted-fact writes; it does not filter recall queries.':
+      '先頭以外の target node に smart ingest routing を設定します。node には空でない `external_space_id` が必要で、未設定の node は routing target になりません。mem9 は抽出した各 fact を自然言語 prompt で評価し、一致した fact をこの node に route します。この policy は抽出 fact の write を制御し、recall query は filter しません。',
+    'Space Chain id.': 'Space Chain id。',
+    'Target node id. The first node cannot have a routing policy.': 'target node id。先頭 node には routing policy を設定できません。',
+    'Whether this node participates in knowledge extraction routing.': 'この node を知識抽出 routing の対象にするかどうか。',
+    'Natural-language matching rule. Required when enabled is true; maximum 1,200 characters.':
+      '自然言語の matching rule。enabled が true の場合は必須で、最大 1,200 文字です。',
+    'When true, matching facts are emitted through Space Chain webhooks but are not saved directly into the target Space.':
+      'true の場合、一致した fact は Space Chain webhook で送信されますが、target Space には直接保存されません。',
+    'Space Chain node id.': 'Space Chain node id。',
+    'Target Space API key / tenant id.': 'target Space API key / tenant id。',
+    'Console Space id used as the routing target identifier when present.': '設定されている場合に routing target identifier として使う Console Space id。',
+    'Display name for the target Space when present.': '設定されている場合の target Space の表示名。',
+    'Zero-based node position.': '0 始まりの node position。',
+    'Whether knowledge extraction routing is enabled.': '知識抽出 routing が有効かどうか。',
+    'Natural-language matching rule when configured.': '設定済みの自然言語 matching rule。',
+    'Whether matching facts are delivered only through Space Chain webhooks.':
+      '一致した fact を Space Chain webhook だけで配信するかどうか。',
+    'Configure knowledge extraction routing': '知識抽出 routing を設定',
+  },
+  ko: {
+    'Update a Space Chain knowledge extraction policy.': 'Space Chain 지식 추출 policy를 업데이트합니다.',
+    'Configures a non-first target node for smart ingest routing. The node must have a non-empty `external_space_id`; nodes without one are not eligible routing targets. mem9 evaluates the natural-language prompt against each extracted fact and routes matching facts to this node. This policy controls extracted-fact writes; it does not filter recall queries.':
+      '첫 번째가 아닌 target node에 smart ingest routing을 설정합니다. node에는 비어 있지 않은 `external_space_id`가 있어야 하며, 없으면 routing target이 될 수 없습니다. mem9는 추출한 각 fact를 자연어 prompt로 평가해 일치하는 fact를 이 node로 route합니다. 이 policy는 추출 fact의 write를 제어하며 recall query를 filter하지 않습니다.',
+    'Space Chain id.': 'Space Chain id.',
+    'Target node id. The first node cannot have a routing policy.': 'target node id. 첫 번째 node에는 routing policy를 설정할 수 없습니다.',
+    'Whether this node participates in knowledge extraction routing.': '이 node가 지식 추출 routing에 참여하는지 여부.',
+    'Natural-language matching rule. Required when enabled is true; maximum 1,200 characters.':
+      '자연어 matching rule. enabled가 true이면 필수이며 최대 1,200자입니다.',
+    'When true, matching facts are emitted through Space Chain webhooks but are not saved directly into the target Space.':
+      'true이면 일치하는 fact를 Space Chain webhook으로 보내지만 target Space에 직접 저장하지 않습니다.',
+    'Space Chain node id.': 'Space Chain node id.',
+    'Target Space API key / tenant id.': 'target Space API key / tenant id.',
+    'Console Space id used as the routing target identifier when present.': '있는 경우 routing target identifier로 사용하는 Console Space id.',
+    'Display name for the target Space when present.': '있는 경우 target Space의 표시 이름.',
+    'Zero-based node position.': '0부터 시작하는 node position.',
+    'Whether knowledge extraction routing is enabled.': '지식 추출 routing 활성화 여부.',
+    'Natural-language matching rule when configured.': '설정된 자연어 matching rule.',
+    'Whether matching facts are delivered only through Space Chain webhooks.':
+      '일치하는 fact를 Space Chain webhook으로만 전달하는지 여부.',
+    'Configure knowledge extraction routing': '지식 추출 routing 설정',
+  },
+  id: {
+    'Update a Space Chain knowledge extraction policy.': 'Perbarui kebijakan ekstraksi pengetahuan Space Chain.',
+    'Configures a non-first target node for smart ingest routing. The node must have a non-empty `external_space_id`; nodes without one are not eligible routing targets. mem9 evaluates the natural-language prompt against each extracted fact and routes matching facts to this node. This policy controls extracted-fact writes; it does not filter recall queries.':
+      'Mengatur smart ingest routing untuk target node selain node pertama. Node harus memiliki `external_space_id` yang tidak kosong; node tanpa nilai ini tidak dapat menjadi routing target. mem9 mengevaluasi prompt bahasa alami terhadap setiap fact yang diekstrak dan merutekan fact yang cocok ke node ini. Kebijakan ini mengatur write untuk fact hasil ekstraksi dan tidak memfilter recall query.',
+    'Space Chain id.': 'id Space Chain.',
+    'Target node id. The first node cannot have a routing policy.': 'id target node. Node pertama tidak dapat memiliki routing policy.',
+    'Whether this node participates in knowledge extraction routing.': 'Apakah node ini ikut dalam routing ekstraksi pengetahuan.',
+    'Natural-language matching rule. Required when enabled is true; maximum 1,200 characters.':
+      'Aturan pencocokan dalam bahasa alami. Wajib saat enabled bernilai true; maksimum 1.200 karakter.',
+    'When true, matching facts are emitted through Space Chain webhooks but are not saved directly into the target Space.':
+      'Jika true, fact yang cocok dikirim melalui webhook Space Chain tetapi tidak disimpan langsung ke target Space.',
+    'Space Chain node id.': 'id node Space Chain.',
+    'Target Space API key / tenant id.': 'API key / tenant id target Space.',
+    'Console Space id used as the routing target identifier when present.': 'id Console Space yang digunakan sebagai identifier routing target jika tersedia.',
+    'Display name for the target Space when present.': 'Nama tampilan target Space jika tersedia.',
+    'Zero-based node position.': 'Posisi node berbasis nol.',
+    'Whether knowledge extraction routing is enabled.': 'Apakah routing ekstraksi pengetahuan diaktifkan.',
+    'Natural-language matching rule when configured.': 'Aturan pencocokan bahasa alami jika dikonfigurasi.',
+    'Whether matching facts are delivered only through Space Chain webhooks.':
+      'Apakah fact yang cocok hanya dikirim melalui webhook Space Chain.',
+    'Configure knowledge extraction routing': 'Atur routing ekstraksi pengetahuan',
+  },
+  th: {
+    'Update a Space Chain knowledge extraction policy.': 'อัปเดต policy การสกัดความรู้ของ Space Chain',
+    'Configures a non-first target node for smart ingest routing. The node must have a non-empty `external_space_id`; nodes without one are not eligible routing targets. mem9 evaluates the natural-language prompt against each extracted fact and routes matching facts to this node. This policy controls extracted-fact writes; it does not filter recall queries.':
+      'ตั้งค่า smart ingest routing ให้ target node ที่ไม่ใช่ node แรก โดย node ต้องมี `external_space_id` ที่ไม่ว่าง มิฉะนั้นจะไม่สามารถเป็น routing target ได้ mem9 จะประเมินแต่ละ fact ที่สกัดด้วย prompt ภาษาธรรมชาติและ route fact ที่ตรงกันไปยัง node นี้ policy นี้ควบคุมการ write fact ที่สกัดแล้ว และไม่ filter recall query',
+    'Space Chain id.': 'id ของ Space Chain',
+    'Target node id. The first node cannot have a routing policy.': 'id ของ target node โดย node แรกไม่สามารถตั้ง routing policy ได้',
+    'Whether this node participates in knowledge extraction routing.': 'node นี้เข้าร่วม routing การสกัดความรู้หรือไม่',
+    'Natural-language matching rule. Required when enabled is true; maximum 1,200 characters.':
+      'กฎการจับคู่ด้วยภาษาธรรมชาติ ต้องระบุเมื่อ enabled เป็น true และยาวได้สูงสุด 1,200 อักขระ',
+    'When true, matching facts are emitted through Space Chain webhooks but are not saved directly into the target Space.':
+      'เมื่อเป็น true fact ที่ตรงกันจะถูกส่งผ่าน Space Chain webhook แต่จะไม่ถูกบันทึกลง target Space โดยตรง',
+    'Space Chain node id.': 'id ของ Space Chain node',
+    'Target Space API key / tenant id.': 'API key / tenant id ของ target Space',
+    'Console Space id used as the routing target identifier when present.': 'id ของ Console Space ที่ใช้เป็น identifier ของ routing target เมื่อมีค่า',
+    'Display name for the target Space when present.': 'ชื่อที่แสดงของ target Space เมื่อมีค่า',
+    'Zero-based node position.': 'ตำแหน่ง node ที่เริ่มนับจาก 0',
+    'Whether knowledge extraction routing is enabled.': 'เปิดใช้ routing การสกัดความรู้หรือไม่',
+    'Natural-language matching rule when configured.': 'กฎการจับคู่ด้วยภาษาธรรมชาติเมื่อมีการตั้งค่า',
+    'Whether matching facts are delivered only through Space Chain webhooks.':
+      'fact ที่ตรงกันถูกส่งผ่าน Space Chain webhook เท่านั้นหรือไม่',
+    'Configure knowledge extraction routing': 'ตั้งค่า routing การสกัดความรู้',
+  },
+};
+
+const webhookApiSharedTextTranslations: Partial<Record<SiteLocale, Record<string, string>>> = {
+  zh: {
+    Webhooks: 'Webhooks',
+    'Create signed event subscriptions for Spaces and Space Chains. mem9 stores endpoint state, delivery attempts, retry state, and delivery history.':
+      '为 Space 和 Space Chain 创建带签名的事件订阅。mem9 会保存 endpoint 状态、delivery 尝试、重试状态和 delivery 历史。',
+    'List Space webhooks.': '列出 Space webhooks。',
+    'Lists webhook endpoints scoped to the Space API key in `X-API-Key`.': '列出 `X-API-Key` 中 Space API key 作用域下的 webhook endpoints。',
+    'List Space webhooks': '列出 Space webhooks',
+    'Create a Space webhook.': '创建 Space webhook。',
+    'Creates a Space-scoped webhook endpoint. The response includes `signing_secret` once; store it before closing the response.':
+      '创建 Space 作用域的 webhook endpoint。响应只会包含一次 `signing_secret`；请在关闭响应前保存。',
+    'Create Space webhook': '创建 Space webhook',
+    'Read one Space webhook.': '读取单个 Space webhook。',
+    'Returns one Space-scoped webhook endpoint without the signing secret.': '返回一个 Space 作用域的 webhook endpoint，不包含 signing secret。',
+    'Update a Space webhook.': '更新 Space webhook。',
+    'Updates endpoint name, URL, enabled state, or subscribed events.': '更新 endpoint 名称、URL、enabled 状态或订阅事件。',
+    'Disable Space webhook': '禁用 Space webhook',
+    'Delete a Space webhook.': '删除 Space webhook。',
+    'Soft-deletes the endpoint. A successful delete returns `204 No Content`.': '软删除 endpoint。删除成功时返回 `204 No Content`。',
+    'Test a Space webhook.': '测试 Space webhook。',
+    'Queues a `webhook.test` delivery to the endpoint so you can verify the receiver and signature handling.':
+      '向 endpoint 排队一个 `webhook.test` delivery，便于验证 receiver 和签名处理。',
+    'Test Space webhook': '测试 Space webhook',
+    'Rotate a Space webhook secret.': '轮换 Space webhook secret。',
+    'Replaces the signing secret and returns the new `signing_secret` once.': '替换 signing secret，并且只返回一次新的 `signing_secret`。',
+    'Rotate Space webhook secret': '轮换 Space webhook secret',
+    'List Space webhook deliveries.': '列出 Space webhook deliveries。',
+    'Returns recent delivery records for the current Space scope.': '返回当前 Space 作用域最近的 delivery records。',
+    'List Space deliveries': '列出 Space deliveries',
+    'List Space Chain webhooks.': '列出 Space Chain webhooks。',
+    'Lists webhook endpoints scoped to a Space Chain. Requires the chain management key in `X-API-Key`.':
+      '列出 Space Chain 作用域下的 webhook endpoints。需要在 `X-API-Key` 中提供 chain management key。',
+    'List Space Chain webhooks': '列出 Space Chain webhooks',
+    'Create a Space Chain webhook.': '创建 Space Chain webhook。',
+    'Creates a chain-scoped webhook endpoint. Use it for chain-level memory events and `space_chain.fact_routed` routing events.':
+      '创建 chain 作用域的 webhook endpoint。可用于 chain-level memory 事件和 `space_chain.fact_routed` 路由事件。',
+    'Create Space Chain webhook': '创建 Space Chain webhook',
+    'Read one Space Chain webhook.': '读取单个 Space Chain webhook。',
+    'Returns one chain-scoped webhook endpoint without the signing secret.': '返回一个 chain 作用域的 webhook endpoint，不包含 signing secret。',
+    'Update a Space Chain webhook.': '更新 Space Chain webhook。',
+    'Updates endpoint name, URL, enabled state, or subscribed events for a chain-scoped endpoint.':
+      '更新 chain 作用域 endpoint 的名称、URL、enabled 状态或订阅事件。',
+    'Update Space Chain webhook': '更新 Space Chain webhook',
+    'Delete a Space Chain webhook.': '删除 Space Chain webhook。',
+    'Soft-deletes the chain-scoped endpoint. A successful delete returns `204 No Content`.':
+      '软删除 chain 作用域 endpoint。删除成功时返回 `204 No Content`。',
+    'Test a Space Chain webhook.': '测试 Space Chain webhook。',
+    'Queues a `webhook.test` delivery for a chain-scoped endpoint.': '为 chain 作用域 endpoint 排队一个 `webhook.test` delivery。',
+    'Test Space Chain webhook': '测试 Space Chain webhook',
+    'Rotate a Space Chain webhook secret.': '轮换 Space Chain webhook secret。',
+    'Replaces the chain-scoped endpoint signing secret and returns the new `signing_secret` once.':
+      '替换 chain 作用域 endpoint 的 signing secret，并且只返回一次新的 `signing_secret`。',
+    'Rotate Space Chain webhook secret': '轮换 Space Chain webhook secret',
+    'List Space Chain webhook deliveries.': '列出 Space Chain webhook deliveries。',
+    'Returns recent delivery records for the Space Chain scope.': '返回 Space Chain 作用域最近的 delivery records。',
+    'List Space Chain deliveries': '列出 Space Chain deliveries',
+    'Human-readable endpoint name.': '人类可读的 endpoint 名称。',
+    'Receiver URL. Production deployments require HTTPS.': '接收方 URL。生产部署要求 HTTPS。',
+    'Whether the endpoint accepts matching events. Defaults to true on create.': 'endpoint 是否接收匹配事件。创建时默认是 true。',
+    'Array of event types to subscribe to: `memory.added`, `memory.deleted`, or `space_chain.fact_routed`.':
+      '要订阅的事件类型数组：`memory.added`、`memory.deleted` 或 `space_chain.fact_routed`。',
+    'Updated endpoint name.': '更新后的 endpoint 名称。',
+    'Updated receiver URL.': '更新后的接收方 URL。',
+    'Whether the endpoint accepts matching events.': 'endpoint 是否接收匹配事件。',
+    'Replacement array of subscribed event types.': '用于替换的订阅事件类型数组。',
+    'Maximum number of deliveries to return. Defaults to 50 and caps at 200.': '要返回的最大 delivery 数量。默认 50，上限 200。',
+    'Webhook endpoint id.': 'Webhook endpoint id。',
+    'Scope type. Space endpoints return `tenant`; Space Chain endpoints return `chain`.':
+      '作用域类型。Space endpoint 返回 `tenant`；Space Chain endpoint 返回 `chain`。',
+    'Tenant id for Space webhooks or chain id for Space Chain webhooks.': 'Space webhook 的 tenant id，或 Space Chain webhook 的 chain id。',
+    'Receiver URL.': '接收方 URL。',
+    'Subscribed event type array.': '已订阅的事件类型数组。',
+    'Array of webhook endpoints.': 'Webhook endpoint 数组。',
+    'One-time signing secret returned only by create and rotate-secret responses.': '一次性 signing secret，只会在 create 和 rotate-secret 响应中返回。',
+    'Delivery id.': 'Delivery id。',
+    'Event id.': 'Event id。',
+    'Webhook endpoint id for this delivery.': '本次 delivery 对应的 webhook endpoint id。',
+    'Event type delivered to the receiver.': '发送给 receiver 的事件类型。',
+    'Delivery scope type.': 'Delivery 作用域类型。',
+    'Delivery scope id.': 'Delivery 作用域 id。',
+    'Delivery status: `pending`, `delivered`, or `failed`.': 'Delivery 状态：`pending`、`delivered` 或 `failed`。',
+    'Delivery attempt count.': 'Delivery 尝试次数。',
+    'Next retry timestamp for pending deliveries.': 'pending delivery 的下一次重试时间戳。',
+    'Most recent HTTP status returned by the receiver.': 'receiver 最近返回的 HTTP 状态。',
+    'Most recent delivery error message.': '最近的 delivery 错误消息。',
+    'Timestamp when delivery reached a 2xx response.': 'delivery 收到 2xx 响应时的时间戳。',
+    'Array of webhook delivery records.': 'Webhook delivery record 数组。',
+    'Queued test delivery record.': '已排队的测试 delivery record。',
+  },
+  'zh-Hant': {
+    Webhooks: 'Webhooks',
+    'Create signed event subscriptions for Spaces and Space Chains. mem9 stores endpoint state, delivery attempts, retry state, and delivery history.':
+      '為 Space 和 Space Chain 建立帶簽名的事件訂閱。mem9 會保存 endpoint 狀態、delivery 嘗試、重試狀態和 delivery 歷史。',
+    'List Space webhooks.': '列出 Space webhooks。',
+    'Lists webhook endpoints scoped to the Space API key in `X-API-Key`.': '列出 `X-API-Key` 中 Space API key 作用域下的 webhook endpoints。',
+    'List Space webhooks': '列出 Space webhooks',
+    'Create a Space webhook.': '建立 Space webhook。',
+    'Creates a Space-scoped webhook endpoint. The response includes `signing_secret` once; store it before closing the response.':
+      '建立 Space 作用域的 webhook endpoint。回應只會包含一次 `signing_secret`；請在關閉回應前保存。',
+    'Create Space webhook': '建立 Space webhook',
+    'Read one Space webhook.': '讀取單個 Space webhook。',
+    'Returns one Space-scoped webhook endpoint without the signing secret.': '回傳一個 Space 作用域的 webhook endpoint，不包含 signing secret。',
+    'Update a Space webhook.': '更新 Space webhook。',
+    'Updates endpoint name, URL, enabled state, or subscribed events.': '更新 endpoint 名稱、URL、enabled 狀態或訂閱事件。',
+    'Disable Space webhook': '停用 Space webhook',
+    'Delete a Space webhook.': '刪除 Space webhook。',
+    'Soft-deletes the endpoint. A successful delete returns `204 No Content`.': '軟刪除 endpoint。刪除成功時回傳 `204 No Content`。',
+    'Test a Space webhook.': '測試 Space webhook。',
+    'Queues a `webhook.test` delivery to the endpoint so you can verify the receiver and signature handling.':
+      '向 endpoint 排入一筆 `webhook.test` delivery，方便驗證 receiver 和簽名處理。',
+    'Test Space webhook': '測試 Space webhook',
+    'Rotate a Space webhook secret.': '輪換 Space webhook secret。',
+    'Replaces the signing secret and returns the new `signing_secret` once.': '替換 signing secret，並且只回傳一次新的 `signing_secret`。',
+    'Rotate Space webhook secret': '輪換 Space webhook secret',
+    'List Space webhook deliveries.': '列出 Space webhook deliveries。',
+    'Returns recent delivery records for the current Space scope.': '回傳目前 Space 作用域最近的 delivery records。',
+    'List Space deliveries': '列出 Space deliveries',
+    'List Space Chain webhooks.': '列出 Space Chain webhooks。',
+    'Lists webhook endpoints scoped to a Space Chain. Requires the chain management key in `X-API-Key`.':
+      '列出 Space Chain 作用域下的 webhook endpoints。需要在 `X-API-Key` 中提供 chain management key。',
+    'List Space Chain webhooks': '列出 Space Chain webhooks',
+    'Create a Space Chain webhook.': '建立 Space Chain webhook。',
+    'Creates a chain-scoped webhook endpoint. Use it for chain-level memory events and `space_chain.fact_routed` routing events.':
+      '建立 chain 作用域的 webhook endpoint。可用於 chain-level memory 事件和 `space_chain.fact_routed` 路由事件。',
+    'Create Space Chain webhook': '建立 Space Chain webhook',
+    'Read one Space Chain webhook.': '讀取單個 Space Chain webhook。',
+    'Returns one chain-scoped webhook endpoint without the signing secret.': '回傳一個 chain 作用域的 webhook endpoint，不包含 signing secret。',
+    'Update a Space Chain webhook.': '更新 Space Chain webhook。',
+    'Updates endpoint name, URL, enabled state, or subscribed events for a chain-scoped endpoint.':
+      '更新 chain 作用域 endpoint 的名稱、URL、enabled 狀態或訂閱事件。',
+    'Update Space Chain webhook': '更新 Space Chain webhook',
+    'Delete a Space Chain webhook.': '刪除 Space Chain webhook。',
+    'Soft-deletes the chain-scoped endpoint. A successful delete returns `204 No Content`.':
+      '軟刪除 chain 作用域 endpoint。刪除成功時回傳 `204 No Content`。',
+    'Test a Space Chain webhook.': '測試 Space Chain webhook。',
+    'Queues a `webhook.test` delivery for a chain-scoped endpoint.': '為 chain 作用域 endpoint 排入一筆 `webhook.test` delivery。',
+    'Test Space Chain webhook': '測試 Space Chain webhook',
+    'Rotate a Space Chain webhook secret.': '輪換 Space Chain webhook secret。',
+    'Replaces the chain-scoped endpoint signing secret and returns the new `signing_secret` once.':
+      '替換 chain 作用域 endpoint 的 signing secret，並且只回傳一次新的 `signing_secret`。',
+    'Rotate Space Chain webhook secret': '輪換 Space Chain webhook secret',
+    'List Space Chain webhook deliveries.': '列出 Space Chain webhook deliveries。',
+    'Returns recent delivery records for the Space Chain scope.': '回傳 Space Chain 作用域最近的 delivery records。',
+    'List Space Chain deliveries': '列出 Space Chain deliveries',
+    'Human-readable endpoint name.': '人類可讀的 endpoint 名稱。',
+    'Receiver URL. Production deployments require HTTPS.': '接收方 URL。production 部署要求 HTTPS。',
+    'Whether the endpoint accepts matching events. Defaults to true on create.': 'endpoint 是否接收匹配事件。建立時預設是 true。',
+    'Array of event types to subscribe to: `memory.added`, `memory.deleted`, or `space_chain.fact_routed`.':
+      '要訂閱的事件類型陣列：`memory.added`、`memory.deleted` 或 `space_chain.fact_routed`。',
+    'Updated endpoint name.': '更新後的 endpoint 名稱。',
+    'Updated receiver URL.': '更新後的接收方 URL。',
+    'Whether the endpoint accepts matching events.': 'endpoint 是否接收匹配事件。',
+    'Replacement array of subscribed event types.': '用於替換的訂閱事件類型陣列。',
+    'Maximum number of deliveries to return. Defaults to 50 and caps at 200.': '要回傳的最大 delivery 數量。預設 50，上限 200。',
+    'Webhook endpoint id.': 'Webhook endpoint id。',
+    'Scope type. Space endpoints return `tenant`; Space Chain endpoints return `chain`.':
+      '作用域類型。Space endpoint 回傳 `tenant`；Space Chain endpoint 回傳 `chain`。',
+    'Tenant id for Space webhooks or chain id for Space Chain webhooks.': 'Space webhook 的 tenant id，或 Space Chain webhook 的 chain id。',
+    'Receiver URL.': '接收方 URL。',
+    'Subscribed event type array.': '已訂閱的事件類型陣列。',
+    'Creation timestamp.': '建立時間戳。',
+    'Last update timestamp.': '最後更新時間戳。',
+    'Array of webhook endpoints.': 'Webhook endpoint 陣列。',
+    'One-time signing secret returned only by create and rotate-secret responses.': '一次性 signing secret，只會在 create 和 rotate-secret 回應中回傳。',
+    'Delivery id.': 'Delivery id。',
+    'Event id.': 'Event id。',
+    'Webhook endpoint id for this delivery.': '本次 delivery 對應的 webhook endpoint id。',
+    'Event type delivered to the receiver.': '送給 receiver 的事件類型。',
+    'Delivery scope type.': 'Delivery 作用域類型。',
+    'Delivery scope id.': 'Delivery 作用域 id。',
+    'Delivery status: `pending`, `delivered`, or `failed`.': 'Delivery 狀態：`pending`、`delivered` 或 `failed`。',
+    'Delivery attempt count.': 'Delivery 嘗試次數。',
+    'Next retry timestamp for pending deliveries.': 'pending delivery 的下一次重試時間戳。',
+    'Most recent HTTP status returned by the receiver.': 'receiver 最近回傳的 HTTP 狀態。',
+    'Most recent delivery error message.': '最近的 delivery 錯誤訊息。',
+    'Timestamp when delivery reached a 2xx response.': 'delivery 收到 2xx 回應時的時間戳。',
+    'Array of webhook delivery records.': 'Webhook delivery record 陣列。',
+    'Queued test delivery record.': '已排入的測試 delivery record。',
+  },
+  ja: {
+    Webhooks: 'Webhooks',
+    'Create signed event subscriptions for Spaces and Space Chains. mem9 stores endpoint state, delivery attempts, retry state, and delivery history.':
+      'Space と Space Chain の署名付き event subscription を作成します。mem9 は endpoint state、delivery attempts、retry state、delivery history を保存します。',
+    'List Space webhooks.': 'Space webhooks を一覧する。',
+    'Lists webhook endpoints scoped to the Space API key in `X-API-Key`.': '`X-API-Key` の Space API key に scoped された webhook endpoints を一覧します。',
+    'List Space webhooks': 'Space webhooks を一覧',
+    'Create a Space webhook.': 'Space webhook を作成する。',
+    'Creates a Space-scoped webhook endpoint. The response includes `signing_secret` once; store it before closing the response.':
+      'Space-scoped webhook endpoint を作成します。response には `signing_secret` が一度だけ含まれるため、閉じる前に保存してください。',
+    'Create Space webhook': 'Space webhook を作成',
+    'Read one Space webhook.': 'Space webhook を 1 件取得する。',
+    'Returns one Space-scoped webhook endpoint without the signing secret.': 'signing secret を含まない Space-scoped webhook endpoint を 1 件返します。',
+    'Update a Space webhook.': 'Space webhook を更新する。',
+    'Updates endpoint name, URL, enabled state, or subscribed events.': 'endpoint name、URL、enabled state、subscribed events を更新します。',
+    'Disable Space webhook': 'Space webhook を無効化',
+    'Delete a Space webhook.': 'Space webhook を削除する。',
+    'Soft-deletes the endpoint. A successful delete returns `204 No Content`.': 'endpoint を soft delete します。成功時は `204 No Content` を返します。',
+    'Test a Space webhook.': 'Space webhook をテストする。',
+    'Queues a `webhook.test` delivery to the endpoint so you can verify the receiver and signature handling.':
+      'receiver と signature handling を検証できるよう、endpoint に `webhook.test` delivery を enqueue します。',
+    'Test Space webhook': 'Space webhook をテスト',
+    'Rotate a Space webhook secret.': 'Space webhook secret を rotate する。',
+    'Replaces the signing secret and returns the new `signing_secret` once.': 'signing secret を置き換え、新しい `signing_secret` を一度だけ返します。',
+    'Rotate Space webhook secret': 'Space webhook secret を rotate',
+    'List Space webhook deliveries.': 'Space webhook deliveries を一覧する。',
+    'Returns recent delivery records for the current Space scope.': '現在の Space scope の最近の delivery records を返します。',
+    'List Space deliveries': 'Space deliveries を一覧',
+    'List Space Chain webhooks.': 'Space Chain webhooks を一覧する。',
+    'Lists webhook endpoints scoped to a Space Chain. Requires the chain management key in `X-API-Key`.':
+      'Space Chain に scoped された webhook endpoints を一覧します。`X-API-Key` には chain management key が必要です。',
+    'List Space Chain webhooks': 'Space Chain webhooks を一覧',
+    'Create a Space Chain webhook.': 'Space Chain webhook を作成する。',
+    'Creates a chain-scoped webhook endpoint. Use it for chain-level memory events and `space_chain.fact_routed` routing events.':
+      'chain-scoped webhook endpoint を作成します。chain-level memory events と `space_chain.fact_routed` routing events に使います。',
+    'Create Space Chain webhook': 'Space Chain webhook を作成',
+    'Read one Space Chain webhook.': 'Space Chain webhook を 1 件取得する。',
+    'Returns one chain-scoped webhook endpoint without the signing secret.': 'signing secret を含まない chain-scoped webhook endpoint を 1 件返します。',
+    'Update a Space Chain webhook.': 'Space Chain webhook を更新する。',
+    'Updates endpoint name, URL, enabled state, or subscribed events for a chain-scoped endpoint.':
+      'chain-scoped endpoint の name、URL、enabled state、subscribed events を更新します。',
+    'Update Space Chain webhook': 'Space Chain webhook を更新',
+    'Delete a Space Chain webhook.': 'Space Chain webhook を削除する。',
+    'Soft-deletes the chain-scoped endpoint. A successful delete returns `204 No Content`.':
+      'chain-scoped endpoint を soft delete します。成功時は `204 No Content` を返します。',
+    'Test a Space Chain webhook.': 'Space Chain webhook をテストする。',
+    'Queues a `webhook.test` delivery for a chain-scoped endpoint.': 'chain-scoped endpoint に `webhook.test` delivery を enqueue します。',
+    'Test Space Chain webhook': 'Space Chain webhook をテスト',
+    'Rotate a Space Chain webhook secret.': 'Space Chain webhook secret を rotate する。',
+    'Replaces the chain-scoped endpoint signing secret and returns the new `signing_secret` once.':
+      'chain-scoped endpoint の signing secret を置き換え、新しい `signing_secret` を一度だけ返します。',
+    'Rotate Space Chain webhook secret': 'Space Chain webhook secret を rotate',
+    'List Space Chain webhook deliveries.': 'Space Chain webhook deliveries を一覧する。',
+    'Returns recent delivery records for the Space Chain scope.': 'Space Chain scope の最近の delivery records を返します。',
+    'List Space Chain deliveries': 'Space Chain deliveries を一覧',
+    'Human-readable endpoint name.': '人が読める endpoint name。',
+    'Receiver URL. Production deployments require HTTPS.': 'receiver URL。production deployment では HTTPS が必要です。',
+    'Whether the endpoint accepts matching events. Defaults to true on create.': 'endpoint が matching events を受け付けるかどうか。create 時の default は true です。',
+    'Array of event types to subscribe to: `memory.added`, `memory.deleted`, or `space_chain.fact_routed`.':
+      'subscribe する event type の配列: `memory.added`、`memory.deleted`、`space_chain.fact_routed`。',
+    'Updated endpoint name.': '更新後の endpoint name。',
+    'Updated receiver URL.': '更新後の receiver URL。',
+    'Whether the endpoint accepts matching events.': 'endpoint が matching events を受け付けるかどうか。',
+    'Replacement array of subscribed event types.': 'subscribed event types を置き換える配列。',
+    'Maximum number of deliveries to return. Defaults to 50 and caps at 200.': '返す delivery の最大数。default は 50、上限は 200 です。',
+    'Webhook endpoint id.': 'Webhook endpoint id。',
+    'Scope type. Space endpoints return `tenant`; Space Chain endpoints return `chain`.':
+      'scope type。Space endpoints は `tenant`、Space Chain endpoints は `chain` を返します。',
+    'Tenant id for Space webhooks or chain id for Space Chain webhooks.': 'Space webhooks の tenant id、または Space Chain webhooks の chain id。',
+    'Receiver URL.': 'receiver URL。',
+    'Subscribed event type array.': 'subscribed event type 配列。',
+    'Creation timestamp.': '作成 timestamp。',
+    'Last update timestamp.': '最終更新 timestamp。',
+    'Array of webhook endpoints.': 'webhook endpoint の配列。',
+    'One-time signing secret returned only by create and rotate-secret responses.': 'create と rotate-secret responses でのみ返る一度限りの signing secret。',
+    'Delivery id.': 'Delivery id。',
+    'Event id.': 'Event id。',
+    'Webhook endpoint id for this delivery.': 'この delivery の webhook endpoint id。',
+    'Event type delivered to the receiver.': 'receiver に送信された event type。',
+    'Delivery scope type.': 'Delivery scope type。',
+    'Delivery scope id.': 'Delivery scope id。',
+    'Delivery status: `pending`, `delivered`, or `failed`.': 'Delivery status: `pending`、`delivered`、`failed`。',
+    'Delivery attempt count.': 'Delivery attempt count。',
+    'Next retry timestamp for pending deliveries.': 'pending deliveries の次回 retry timestamp。',
+    'Most recent HTTP status returned by the receiver.': 'receiver が返した最新の HTTP status。',
+    'Most recent delivery error message.': '最新の delivery error message。',
+    'Timestamp when delivery reached a 2xx response.': 'delivery が 2xx response に到達した timestamp。',
+    'Array of webhook delivery records.': 'webhook delivery record の配列。',
+    'Queued test delivery record.': 'enqueue 済みの test delivery record。',
+  },
+  ko: {
+    Webhooks: 'Webhooks',
+    'Create signed event subscriptions for Spaces and Space Chains. mem9 stores endpoint state, delivery attempts, retry state, and delivery history.':
+      'Space 와 Space Chain 의 signed event subscription 을 생성합니다. mem9 는 endpoint state, delivery attempts, retry state, delivery history 를 저장합니다.',
+    'List Space webhooks.': 'Space webhooks 를 조회합니다.',
+    'Lists webhook endpoints scoped to the Space API key in `X-API-Key`.': '`X-API-Key` 의 Space API key scope 에 해당하는 webhook endpoints 를 조회합니다.',
+    'List Space webhooks': 'Space webhooks 조회',
+    'Create a Space webhook.': 'Space webhook 을 생성합니다.',
+    'Creates a Space-scoped webhook endpoint. The response includes `signing_secret` once; store it before closing the response.':
+      'Space-scoped webhook endpoint 를 생성합니다. response 에는 `signing_secret` 이 한 번만 포함되므로 response 를 닫기 전에 저장하세요.',
+    'Create Space webhook': 'Space webhook 생성',
+    'Read one Space webhook.': 'Space webhook 하나를 조회합니다.',
+    'Returns one Space-scoped webhook endpoint without the signing secret.': 'signing secret 없이 Space-scoped webhook endpoint 하나를 반환합니다.',
+    'Update a Space webhook.': 'Space webhook 을 업데이트합니다.',
+    'Updates endpoint name, URL, enabled state, or subscribed events.': 'endpoint name, URL, enabled state, subscribed events 를 업데이트합니다.',
+    'Disable Space webhook': 'Space webhook 비활성화',
+    'Delete a Space webhook.': 'Space webhook 을 삭제합니다.',
+    'Soft-deletes the endpoint. A successful delete returns `204 No Content`.': 'endpoint 를 soft delete 합니다. 성공하면 `204 No Content` 를 반환합니다.',
+    'Test a Space webhook.': 'Space webhook 을 테스트합니다.',
+    'Queues a `webhook.test` delivery to the endpoint so you can verify the receiver and signature handling.':
+      'receiver 와 signature handling 을 검증할 수 있도록 endpoint 에 `webhook.test` delivery 를 queue 합니다.',
+    'Test Space webhook': 'Space webhook 테스트',
+    'Rotate a Space webhook secret.': 'Space webhook secret 을 rotate 합니다.',
+    'Replaces the signing secret and returns the new `signing_secret` once.': 'signing secret 을 교체하고 새 `signing_secret` 을 한 번만 반환합니다.',
+    'Rotate Space webhook secret': 'Space webhook secret rotate',
+    'List Space webhook deliveries.': 'Space webhook deliveries 를 조회합니다.',
+    'Returns recent delivery records for the current Space scope.': '현재 Space scope 의 최근 delivery records 를 반환합니다.',
+    'List Space deliveries': 'Space deliveries 조회',
+    'List Space Chain webhooks.': 'Space Chain webhooks 를 조회합니다.',
+    'Lists webhook endpoints scoped to a Space Chain. Requires the chain management key in `X-API-Key`.':
+      'Space Chain scope 의 webhook endpoints 를 조회합니다. `X-API-Key` 에 chain management key 가 필요합니다.',
+    'List Space Chain webhooks': 'Space Chain webhooks 조회',
+    'Create a Space Chain webhook.': 'Space Chain webhook 을 생성합니다.',
+    'Creates a chain-scoped webhook endpoint. Use it for chain-level memory events and `space_chain.fact_routed` routing events.':
+      'chain-scoped webhook endpoint 를 생성합니다. chain-level memory events 와 `space_chain.fact_routed` routing events 에 사용합니다.',
+    'Create Space Chain webhook': 'Space Chain webhook 생성',
+    'Read one Space Chain webhook.': 'Space Chain webhook 하나를 조회합니다.',
+    'Returns one chain-scoped webhook endpoint without the signing secret.': 'signing secret 없이 chain-scoped webhook endpoint 하나를 반환합니다.',
+    'Update a Space Chain webhook.': 'Space Chain webhook 을 업데이트합니다.',
+    'Updates endpoint name, URL, enabled state, or subscribed events for a chain-scoped endpoint.':
+      'chain-scoped endpoint 의 name, URL, enabled state, subscribed events 를 업데이트합니다.',
+    'Update Space Chain webhook': 'Space Chain webhook 업데이트',
+    'Delete a Space Chain webhook.': 'Space Chain webhook 을 삭제합니다.',
+    'Soft-deletes the chain-scoped endpoint. A successful delete returns `204 No Content`.':
+      'chain-scoped endpoint 를 soft delete 합니다. 성공하면 `204 No Content` 를 반환합니다.',
+    'Test a Space Chain webhook.': 'Space Chain webhook 을 테스트합니다.',
+    'Queues a `webhook.test` delivery for a chain-scoped endpoint.': 'chain-scoped endpoint 에 `webhook.test` delivery 를 queue 합니다.',
+    'Test Space Chain webhook': 'Space Chain webhook 테스트',
+    'Rotate a Space Chain webhook secret.': 'Space Chain webhook secret 을 rotate 합니다.',
+    'Replaces the chain-scoped endpoint signing secret and returns the new `signing_secret` once.':
+      'chain-scoped endpoint signing secret 을 교체하고 새 `signing_secret` 을 한 번만 반환합니다.',
+    'Rotate Space Chain webhook secret': 'Space Chain webhook secret rotate',
+    'List Space Chain webhook deliveries.': 'Space Chain webhook deliveries 를 조회합니다.',
+    'Returns recent delivery records for the Space Chain scope.': 'Space Chain scope 의 최근 delivery records 를 반환합니다.',
+    'List Space Chain deliveries': 'Space Chain deliveries 조회',
+    'Human-readable endpoint name.': '사람이 읽을 수 있는 endpoint name.',
+    'Receiver URL. Production deployments require HTTPS.': 'receiver URL. production deployment 에서는 HTTPS 가 필요합니다.',
+    'Whether the endpoint accepts matching events. Defaults to true on create.': 'endpoint 가 matching events 를 받을지 여부. create 시 기본값은 true 입니다.',
+    'Array of event types to subscribe to: `memory.added`, `memory.deleted`, or `space_chain.fact_routed`.':
+      'subscribe 할 event type 배열: `memory.added`, `memory.deleted`, `space_chain.fact_routed`.',
+    'Updated endpoint name.': '업데이트된 endpoint name.',
+    'Updated receiver URL.': '업데이트된 receiver URL.',
+    'Whether the endpoint accepts matching events.': 'endpoint 가 matching events 를 받을지 여부.',
+    'Replacement array of subscribed event types.': 'subscribed event types 를 교체할 배열.',
+    'Maximum number of deliveries to return. Defaults to 50 and caps at 200.': '반환할 delivery 최대 수. 기본값은 50, 상한은 200 입니다.',
+    'Webhook endpoint id.': 'Webhook endpoint id.',
+    'Scope type. Space endpoints return `tenant`; Space Chain endpoints return `chain`.':
+      'scope type. Space endpoints 는 `tenant`, Space Chain endpoints 는 `chain` 을 반환합니다.',
+    'Tenant id for Space webhooks or chain id for Space Chain webhooks.': 'Space webhooks 의 tenant id 또는 Space Chain webhooks 의 chain id.',
+    'Receiver URL.': 'receiver URL.',
+    'Subscribed event type array.': 'subscribed event type 배열.',
+    'Creation timestamp.': '생성 timestamp.',
+    'Last update timestamp.': '마지막 업데이트 timestamp.',
+    'Array of webhook endpoints.': 'webhook endpoint 배열.',
+    'One-time signing secret returned only by create and rotate-secret responses.': 'create 와 rotate-secret responses 에서만 반환되는 one-time signing secret.',
+    'Delivery id.': 'Delivery id.',
+    'Event id.': 'Event id.',
+    'Webhook endpoint id for this delivery.': '이 delivery 의 webhook endpoint id.',
+    'Event type delivered to the receiver.': 'receiver 로 전달된 event type.',
+    'Delivery scope type.': 'Delivery scope type.',
+    'Delivery scope id.': 'Delivery scope id.',
+    'Delivery status: `pending`, `delivered`, or `failed`.': 'Delivery status: `pending`, `delivered`, `failed`.',
+    'Delivery attempt count.': 'Delivery attempt count.',
+    'Next retry timestamp for pending deliveries.': 'pending deliveries 의 다음 retry timestamp.',
+    'Most recent HTTP status returned by the receiver.': 'receiver 가 반환한 가장 최근 HTTP status.',
+    'Most recent delivery error message.': '가장 최근 delivery error message.',
+    'Timestamp when delivery reached a 2xx response.': 'delivery 가 2xx response 에 도달한 timestamp.',
+    'Array of webhook delivery records.': 'webhook delivery record 배열.',
+    'Queued test delivery record.': 'queue 된 test delivery record.',
+  },
+  id: {
+    Webhooks: 'Webhooks',
+    'Create signed event subscriptions for Spaces and Space Chains. mem9 stores endpoint state, delivery attempts, retry state, and delivery history.':
+      'Buat langganan event bertanda tangan untuk Space dan Space Chain. mem9 menyimpan endpoint state, delivery attempts, retry state, dan delivery history.',
+    'List Space webhooks.': 'List Space webhooks.',
+    'Lists webhook endpoints scoped to the Space API key in `X-API-Key`.': 'Menampilkan webhook endpoints dalam scope Space API key di `X-API-Key`.',
+    'List Space webhooks': 'List Space webhooks',
+    'Create a Space webhook.': 'Buat Space webhook.',
+    'Creates a Space-scoped webhook endpoint. The response includes `signing_secret` once; store it before closing the response.':
+      'Membuat webhook endpoint dalam scope Space. Response menyertakan `signing_secret` sekali saja; simpan sebelum response ditutup.',
+    'Create Space webhook': 'Buat Space webhook',
+    'Read one Space webhook.': 'Baca satu Space webhook.',
+    'Returns one Space-scoped webhook endpoint without the signing secret.': 'Mengembalikan satu Space-scoped webhook endpoint tanpa signing secret.',
+    'Update a Space webhook.': 'Update Space webhook.',
+    'Updates endpoint name, URL, enabled state, or subscribed events.': 'Mengupdate endpoint name, URL, enabled state, atau subscribed events.',
+    'Disable Space webhook': 'Nonaktifkan Space webhook',
+    'Delete a Space webhook.': 'Hapus Space webhook.',
+    'Soft-deletes the endpoint. A successful delete returns `204 No Content`.': 'Melakukan soft-delete endpoint. Delete yang berhasil mengembalikan `204 No Content`.',
+    'Test a Space webhook.': 'Test Space webhook.',
+    'Queues a `webhook.test` delivery to the endpoint so you can verify the receiver and signature handling.':
+      'Mengantrekan `webhook.test` delivery ke endpoint agar Anda dapat memverifikasi receiver dan signature handling.',
+    'Test Space webhook': 'Test Space webhook',
+    'Rotate a Space webhook secret.': 'Rotate Space webhook secret.',
+    'Replaces the signing secret and returns the new `signing_secret` once.': 'Mengganti signing secret dan mengembalikan `signing_secret` baru sekali saja.',
+    'Rotate Space webhook secret': 'Rotate Space webhook secret',
+    'List Space webhook deliveries.': 'List Space webhook deliveries.',
+    'Returns recent delivery records for the current Space scope.': 'Mengembalikan delivery records terbaru untuk scope Space saat ini.',
+    'List Space deliveries': 'List Space deliveries',
+    'List Space Chain webhooks.': 'List Space Chain webhooks.',
+    'Lists webhook endpoints scoped to a Space Chain. Requires the chain management key in `X-API-Key`.':
+      'Menampilkan webhook endpoints dalam scope Space Chain. Memerlukan chain management key di `X-API-Key`.',
+    'List Space Chain webhooks': 'List Space Chain webhooks',
+    'Create a Space Chain webhook.': 'Buat Space Chain webhook.',
+    'Creates a chain-scoped webhook endpoint. Use it for chain-level memory events and `space_chain.fact_routed` routing events.':
+      'Membuat chain-scoped webhook endpoint. Gunakan untuk chain-level memory events dan `space_chain.fact_routed` routing events.',
+    'Create Space Chain webhook': 'Buat Space Chain webhook',
+    'Read one Space Chain webhook.': 'Baca satu Space Chain webhook.',
+    'Returns one chain-scoped webhook endpoint without the signing secret.': 'Mengembalikan satu chain-scoped webhook endpoint tanpa signing secret.',
+    'Update a Space Chain webhook.': 'Update Space Chain webhook.',
+    'Updates endpoint name, URL, enabled state, or subscribed events for a chain-scoped endpoint.':
+      'Mengupdate endpoint name, URL, enabled state, atau subscribed events untuk chain-scoped endpoint.',
+    'Update Space Chain webhook': 'Update Space Chain webhook',
+    'Delete a Space Chain webhook.': 'Hapus Space Chain webhook.',
+    'Soft-deletes the chain-scoped endpoint. A successful delete returns `204 No Content`.':
+      'Melakukan soft-delete chain-scoped endpoint. Delete yang berhasil mengembalikan `204 No Content`.',
+    'Test a Space Chain webhook.': 'Test Space Chain webhook.',
+    'Queues a `webhook.test` delivery for a chain-scoped endpoint.': 'Mengantrekan `webhook.test` delivery untuk chain-scoped endpoint.',
+    'Test Space Chain webhook': 'Test Space Chain webhook',
+    'Rotate a Space Chain webhook secret.': 'Rotate Space Chain webhook secret.',
+    'Replaces the chain-scoped endpoint signing secret and returns the new `signing_secret` once.':
+      'Mengganti signing secret milik chain-scoped endpoint dan mengembalikan `signing_secret` baru sekali saja.',
+    'Rotate Space Chain webhook secret': 'Rotate Space Chain webhook secret',
+    'List Space Chain webhook deliveries.': 'List Space Chain webhook deliveries.',
+    'Returns recent delivery records for the Space Chain scope.': 'Mengembalikan delivery records terbaru untuk scope Space Chain.',
+    'List Space Chain deliveries': 'List Space Chain deliveries',
+    'Human-readable endpoint name.': 'endpoint name yang mudah dibaca.',
+    'Receiver URL. Production deployments require HTTPS.': 'receiver URL. Production deployment memerlukan HTTPS.',
+    'Whether the endpoint accepts matching events. Defaults to true on create.': 'Apakah endpoint menerima matching events. Default true saat create.',
+    'Array of event types to subscribe to: `memory.added`, `memory.deleted`, or `space_chain.fact_routed`.':
+      'Array event type yang disubscribe: `memory.added`, `memory.deleted`, atau `space_chain.fact_routed`.',
+    'Updated endpoint name.': 'endpoint name yang diperbarui.',
+    'Updated receiver URL.': 'receiver URL yang diperbarui.',
+    'Whether the endpoint accepts matching events.': 'Apakah endpoint menerima matching events.',
+    'Replacement array of subscribed event types.': 'Array pengganti untuk subscribed event types.',
+    'Maximum number of deliveries to return. Defaults to 50 and caps at 200.': 'Jumlah maksimum deliveries yang dikembalikan. Default 50 dan batas atas 200.',
+    'Webhook endpoint id.': 'Webhook endpoint id.',
+    'Scope type. Space endpoints return `tenant`; Space Chain endpoints return `chain`.':
+      'scope type. Space endpoints mengembalikan `tenant`; Space Chain endpoints mengembalikan `chain`.',
+    'Tenant id for Space webhooks or chain id for Space Chain webhooks.': 'tenant id untuk Space webhooks atau chain id untuk Space Chain webhooks.',
+    'Receiver URL.': 'receiver URL.',
+    'Subscribed event type array.': 'Array subscribed event type.',
+    'Creation timestamp.': 'Timestamp pembuatan.',
+    'Last update timestamp.': 'Timestamp update terakhir.',
+    'Array of webhook endpoints.': 'Array webhook endpoints.',
+    'One-time signing secret returned only by create and rotate-secret responses.': 'One-time signing secret yang hanya dikembalikan oleh response create dan rotate-secret.',
+    'Delivery id.': 'Delivery id.',
+    'Event id.': 'Event id.',
+    'Webhook endpoint id for this delivery.': 'webhook endpoint id untuk delivery ini.',
+    'Event type delivered to the receiver.': 'event type yang dikirim ke receiver.',
+    'Delivery scope type.': 'Delivery scope type.',
+    'Delivery scope id.': 'Delivery scope id.',
+    'Delivery status: `pending`, `delivered`, or `failed`.': 'Delivery status: `pending`, `delivered`, atau `failed`.',
+    'Delivery attempt count.': 'Jumlah delivery attempt.',
+    'Next retry timestamp for pending deliveries.': 'Timestamp retry berikutnya untuk pending deliveries.',
+    'Most recent HTTP status returned by the receiver.': 'HTTP status terbaru yang dikembalikan receiver.',
+    'Most recent delivery error message.': 'delivery error message terbaru.',
+    'Timestamp when delivery reached a 2xx response.': 'Timestamp saat delivery menerima response 2xx.',
+    'Array of webhook delivery records.': 'Array webhook delivery records.',
+    'Queued test delivery record.': 'test delivery record yang sudah diantrekan.',
+  },
+  th: {
+    Webhooks: 'Webhooks',
+    'Create signed event subscriptions for Spaces and Space Chains. mem9 stores endpoint state, delivery attempts, retry state, and delivery history.':
+      'สร้าง event subscriptions พร้อมลายเซ็นสำหรับ Space และ Space Chain โดย mem9 จะเก็บ endpoint state, delivery attempts, retry state และ delivery history',
+    'List Space webhooks.': 'แสดง Space webhooks',
+    'Lists webhook endpoints scoped to the Space API key in `X-API-Key`.': 'แสดง webhook endpoints ใน scope ของ Space API key ที่อยู่ใน `X-API-Key`',
+    'List Space webhooks': 'แสดง Space webhooks',
+    'Create a Space webhook.': 'สร้าง Space webhook',
+    'Creates a Space-scoped webhook endpoint. The response includes `signing_secret` once; store it before closing the response.':
+      'สร้าง webhook endpoint ใน scope ของ Space โดย response มี `signing_secret` เพียงครั้งเดียว โปรดบันทึกไว้ก่อนปิด response',
+    'Create Space webhook': 'สร้าง Space webhook',
+    'Read one Space webhook.': 'อ่าน Space webhook หนึ่งรายการ',
+    'Returns one Space-scoped webhook endpoint without the signing secret.': 'คืน webhook endpoint ใน scope ของ Space หนึ่งรายการโดยไม่มี signing secret',
+    'Update a Space webhook.': 'อัปเดต Space webhook',
+    'Updates endpoint name, URL, enabled state, or subscribed events.': 'อัปเดต endpoint name, URL, enabled state หรือ subscribed events',
+    'Disable Space webhook': 'ปิดใช้งาน Space webhook',
+    'Delete a Space webhook.': 'ลบ Space webhook',
+    'Soft-deletes the endpoint. A successful delete returns `204 No Content`.': 'soft-delete endpoint และคืน `204 No Content` เมื่อสำเร็จ',
+    'Test a Space webhook.': 'ทดสอบ Space webhook',
+    'Queues a `webhook.test` delivery to the endpoint so you can verify the receiver and signature handling.':
+      'คิว `webhook.test` delivery ไปยัง endpoint เพื่อให้ตรวจสอบ receiver และ signature handling ได้',
+    'Test Space webhook': 'ทดสอบ Space webhook',
+    'Rotate a Space webhook secret.': 'rotate Space webhook secret',
+    'Replaces the signing secret and returns the new `signing_secret` once.': 'แทนที่ signing secret และคืน `signing_secret` ใหม่เพียงครั้งเดียว',
+    'Rotate Space webhook secret': 'rotate Space webhook secret',
+    'List Space webhook deliveries.': 'แสดง Space webhook deliveries',
+    'Returns recent delivery records for the current Space scope.': 'คืน delivery records ล่าสุดสำหรับ Space scope ปัจจุบัน',
+    'List Space deliveries': 'แสดง Space deliveries',
+    'List Space Chain webhooks.': 'แสดง Space Chain webhooks',
+    'Lists webhook endpoints scoped to a Space Chain. Requires the chain management key in `X-API-Key`.':
+      'แสดง webhook endpoints ใน scope ของ Space Chain ต้องใช้ chain management key ใน `X-API-Key`',
+    'List Space Chain webhooks': 'แสดง Space Chain webhooks',
+    'Create a Space Chain webhook.': 'สร้าง Space Chain webhook',
+    'Creates a chain-scoped webhook endpoint. Use it for chain-level memory events and `space_chain.fact_routed` routing events.':
+      'สร้าง chain-scoped webhook endpoint ใช้สำหรับ chain-level memory events และ `space_chain.fact_routed` routing events',
+    'Create Space Chain webhook': 'สร้าง Space Chain webhook',
+    'Read one Space Chain webhook.': 'อ่าน Space Chain webhook หนึ่งรายการ',
+    'Returns one chain-scoped webhook endpoint without the signing secret.': 'คืน chain-scoped webhook endpoint หนึ่งรายการโดยไม่มี signing secret',
+    'Update a Space Chain webhook.': 'อัปเดต Space Chain webhook',
+    'Updates endpoint name, URL, enabled state, or subscribed events for a chain-scoped endpoint.':
+      'อัปเดต endpoint name, URL, enabled state หรือ subscribed events สำหรับ chain-scoped endpoint',
+    'Update Space Chain webhook': 'อัปเดต Space Chain webhook',
+    'Delete a Space Chain webhook.': 'ลบ Space Chain webhook',
+    'Soft-deletes the chain-scoped endpoint. A successful delete returns `204 No Content`.':
+      'soft-delete chain-scoped endpoint และคืน `204 No Content` เมื่อสำเร็จ',
+    'Test a Space Chain webhook.': 'ทดสอบ Space Chain webhook',
+    'Queues a `webhook.test` delivery for a chain-scoped endpoint.': 'คิว `webhook.test` delivery สำหรับ chain-scoped endpoint',
+    'Test Space Chain webhook': 'ทดสอบ Space Chain webhook',
+    'Rotate a Space Chain webhook secret.': 'rotate Space Chain webhook secret',
+    'Replaces the chain-scoped endpoint signing secret and returns the new `signing_secret` once.':
+      'แทนที่ signing secret ของ chain-scoped endpoint และคืน `signing_secret` ใหม่เพียงครั้งเดียว',
+    'Rotate Space Chain webhook secret': 'rotate Space Chain webhook secret',
+    'List Space Chain webhook deliveries.': 'แสดง Space Chain webhook deliveries',
+    'Returns recent delivery records for the Space Chain scope.': 'คืน delivery records ล่าสุดสำหรับ Space Chain scope',
+    'List Space Chain deliveries': 'แสดง Space Chain deliveries',
+    'Human-readable endpoint name.': 'endpoint name ที่อ่านเข้าใจง่าย',
+    'Receiver URL. Production deployments require HTTPS.': 'receiver URL โดย production deployment ต้องใช้ HTTPS',
+    'Whether the endpoint accepts matching events. Defaults to true on create.': 'endpoint รับ matching events หรือไม่ ค่าเริ่มต้นตอน create คือ true',
+    'Array of event types to subscribe to: `memory.added`, `memory.deleted`, or `space_chain.fact_routed`.':
+      'array ของ event types ที่ subscribe: `memory.added`, `memory.deleted` หรือ `space_chain.fact_routed`',
+    'Updated endpoint name.': 'endpoint name ที่อัปเดตแล้ว',
+    'Updated receiver URL.': 'receiver URL ที่อัปเดตแล้ว',
+    'Whether the endpoint accepts matching events.': 'endpoint รับ matching events หรือไม่',
+    'Replacement array of subscribed event types.': 'array ใหม่สำหรับ subscribed event types',
+    'Maximum number of deliveries to return. Defaults to 50 and caps at 200.': 'จำนวน deliveries สูงสุดที่จะคืน ค่าเริ่มต้น 50 และสูงสุด 200',
+    'Webhook endpoint id.': 'Webhook endpoint id',
+    'Scope type. Space endpoints return `tenant`; Space Chain endpoints return `chain`.':
+      'scope type โดย Space endpoints คืน `tenant` และ Space Chain endpoints คืน `chain`',
+    'Tenant id for Space webhooks or chain id for Space Chain webhooks.': 'tenant id สำหรับ Space webhooks หรือ chain id สำหรับ Space Chain webhooks',
+    'Receiver URL.': 'receiver URL',
+    'Subscribed event type array.': 'array ของ subscribed event type',
+    'Creation timestamp.': 'timestamp การสร้าง',
+    'Last update timestamp.': 'timestamp การอัปเดตล่าสุด',
+    'Array of webhook endpoints.': 'array ของ webhook endpoints',
+    'One-time signing secret returned only by create and rotate-secret responses.': 'one-time signing secret ที่คืนเฉพาะจาก response ของ create และ rotate-secret',
+    'Delivery id.': 'Delivery id',
+    'Event id.': 'Event id',
+    'Webhook endpoint id for this delivery.': 'webhook endpoint id สำหรับ delivery นี้',
+    'Event type delivered to the receiver.': 'event type ที่ส่งไปยัง receiver',
+    'Delivery scope type.': 'Delivery scope type',
+    'Delivery scope id.': 'Delivery scope id',
+    'Delivery status: `pending`, `delivered`, or `failed`.': 'Delivery status: `pending`, `delivered` หรือ `failed`',
+    'Delivery attempt count.': 'จำนวน delivery attempt',
+    'Next retry timestamp for pending deliveries.': 'timestamp retry ครั้งถัดไปสำหรับ pending deliveries',
+    'Most recent HTTP status returned by the receiver.': 'HTTP status ล่าสุดที่ receiver คืนมา',
+    'Most recent delivery error message.': 'delivery error message ล่าสุด',
+    'Timestamp when delivery reached a 2xx response.': 'timestamp เมื่อ delivery ได้รับ response 2xx',
+    'Array of webhook delivery records.': 'array ของ webhook delivery records',
+    'Queued test delivery record.': 'test delivery record ที่ถูกคิวแล้ว',
+  },
+};
+
+export function localizeApiSharedText(locale: SiteLocale, text: string): string {
+  if (locale === 'en') {
+    return text;
+  }
+
+  return apiSharedTextTranslations[locale]?.[text] ?? webhookApiSharedTextTranslations[locale]?.[text] ?? text;
+}
+
+function localizeApiFields(locale: SiteLocale, fields: SiteApiFieldCopy[] | undefined): SiteApiFieldCopy[] | undefined {
+  return fields?.map((field) => ({
+    ...field,
+    description: localizeApiSharedText(locale, field.description),
+  }));
+}
+
+function localizeApiEndpoint(locale: SiteLocale, endpoint: SiteApiEndpointCopy): SiteApiEndpointCopy {
+  return {
+    ...endpoint,
+    summary: localizeApiSharedText(locale, endpoint.summary),
+    description: endpoint.description ? localizeApiSharedText(locale, endpoint.description) : undefined,
+    notes: endpoint.notes?.map((note) => localizeApiSharedText(locale, note)),
+    headers: localizeApiFields(locale, endpoint.headers),
+    pathParams: localizeApiFields(locale, endpoint.pathParams),
+    queryParams: localizeApiFields(locale, endpoint.queryParams),
+    bodyFields: localizeApiFields(locale, endpoint.bodyFields),
+    responseFields: localizeApiFields(locale, endpoint.responseFields),
+    examples: endpoint.examples?.map((example) => ({
+      ...example,
+      label: localizeApiSharedText(locale, example.label),
+    })),
+  };
+}
+
+export function localizeApiPageCopy(locale: SiteLocale, copy: SiteApiPageCopy): SiteApiPageCopy {
+  return {
+    ...copy,
+    endpointGroups: copy.endpointGroups.map((group) => ({
+      ...group,
+      title: localizeApiSharedText(locale, group.title),
+      description: localizeApiSharedText(locale, group.description),
+      endpoints: group.endpoints.map((endpoint) => localizeApiEndpoint(locale, endpoint)),
+    })),
+  };
+}
+
 export const siteCopy: Record<SiteLocale, SiteDictionary> = {
   en: {
     meta: {
-      title: 'mem9 - Unlimited Memory Infrastructure for OpenClaw',
+      title: 'mem9 - Persistent Memory for AI Agents',
       description:
-        'mem9.ai is unlimited memory infrastructure for OpenClaw. Persistent recall, hybrid search, and multi-agent context for Claude Code, OpenCode, OpenClaw, and custom tools.',
+        'mem9.ai gives OpenClaw, Hermes Agent, Dify, Claude Code, OpenCode, Codex, and custom tools shared persistent memory with hybrid recall and a visual dashboard.',
     },
     nav: {
       home: 'Home',
@@ -2368,51 +6306,64 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       benchmark: 'Benchmark',
       openclaw: 'OpenClaw',
       yourMemory: 'Your Memory',
-      billing: 'Billing',
+      yourMemoryDescription: 'Visual memory management',
+      webConsole: 'Web Console',
+      webConsoleDescription: 'Manage your spaces, space chains, usage, and orders.',
+      login: 'Log in',
+      billing: 'Pricing',
       security: 'Security',
       faq: 'FAQ',
       github: 'GitHub',
+      xcom: 'X.com',
       docs: 'Docs',
+      mem9Docs: 'mem9 Docs',
+      consoleDocs: 'mem9 Console Docs',
       api: 'API',
+      apiReferences: 'API References',
+      howItWork: 'How it work',
+      releaseNotes: 'Release Notes',
       contact: 'Contact Us',
     },
     hero: {
       eyebrow: 'MEM9.AI',
       titleLead: 'Unlimited memory',
-      titleAccent: 'for OpenClaw',
+      titleAccent: 'for AI agents',
       subtitle:
-        'Your agents forget everything between sessions. mem9 fixes that. Persistent memory infrastructure with hybrid search, shared spaces, and cross-agent recall from first write to forever.',
-      poweredByLabel: 'Powered by TiDB Cloud',
-      onboardingLabel: 'How to install',
-      onboardingHint: 'Copy the command above into OpenClaw to get started. An API key is generated automatically \u2014 no sign-up required.',
+        'Your agents forget everything between sessions. mem9 gives the agents you use one shared memory layer with hybrid recall and a visual dashboard.',
+      guideSelector: {
+        label: 'Works with your agent stack',
+        items: guideSelectorItems,
+      },
+      onboardingLabel: 'Install for OpenClaw',
+      onboardingBadge: 'Paste in OpenClaw',
+      onboardingHint:
+        'OpenClaw will automatically install mem9 and provision an <strong>API key</strong> for you.',
       onboardingStableLabel: 'Stable',
       onboardingBetaLabel: 'Beta',
       onboardingCommandStable:
         'Read https://mem9.ai/SKILL.md and follow the instructions to install and configure mem9 for OpenClaw',
       onboardingCommandBeta:
         'Read https://mem9.ai/beta/SKILL.md and follow the instructions to install and configure mem9 for OpenClaw',
-      substrateCtaLabel:
-        'Need the backend substrate behind memory? Explore via TiDB Cloud Zero \u2192',
       betaFeature: {
         title: 'Context Engine Support',
         description:
-          'Now with support for the latest Context Engine, mem9 helps your agent remember what matters and bring in only the right memory for each task—so users repeat less, responses stay more accurate, and prompts stay lean. The result is a faster, more focused agent experience with lower token usage and less wasted cost.',
+          'Now with support for the latest Context Engine, mem9 helps your agent remember what matters and bring in only the right memory for each task, so users repeat less, responses stay more accurate, and prompts stay lean.',
       },
       highlights: [
         {
-          title: 'Never forget again',
+          title: 'Persistent across sessions',
           description:
-            'Cloud-persistent memory that survives resets, restarts, and machine switches.',
+            'Cloud memory survives resets, restarts, long-running projects, and machine switches.',
         },
         {
-          title: 'Securely backed up',
+          title: 'Shared across agents',
           description:
-            'Your agent memory lives in durable cloud storage, not fragile local files.',
+            'One memory space can serve any agent or API client through the same key.',
         },
         {
-          title: 'Seamless onboarding',
+          title: 'Visible in a dashboard',
           description:
-            'Start with one instruction, then bring over existing memory without breaking your flow.',
+            'Review, analyze, import, and export memory from the hosted mem9.ai interface.',
         },
       ],
     },
@@ -2458,15 +6409,59 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
     },
     platforms: {
       kicker: 'Platforms',
-      title: 'One memory layer. Every agent.',
+      title: 'Shared memory, every agent stack',
       description:
-        "Agents shouldn't lose context when they switch tools. mem9 gives every agent in your stack a shared, persistent memory that stays durable, searchable, and always in sync.",
+        'Give every agent runtime and workflow platform in your stack the same durable, searchable memory space.',
       items: [
         {
           name: 'OpenClaw',
-          desc: 'Unlimited memory',
+          desc: 'Memory plugin',
           detail:
-            'Give your OpenClaw agents memory that never expires. Recall past conversations, reuse learned knowledge, and stay consistent session after session.',
+            'Paste the install command at the top of this page into OpenClaw and it sets up automatically.',
+          guideId: 'openclaw',
+        },
+        {
+          name: 'Hermes Agent',
+          desc: 'Memory provider',
+          detail:
+            'Install the standalone Hermes memory provider plugin and activate it in Hermes Agent.',
+          guideId: 'hermes',
+        },
+        {
+          name: 'Claude Code',
+          desc: 'Hooks and skills',
+          detail:
+            'Use the Claude Code plugin package to persist and recall memory through mem9 hooks.',
+          guideId: 'claude',
+        },
+        {
+          name: 'OpenCode',
+          desc: 'Plugin SDK',
+          detail:
+            'Load the mem9 OpenCode integration from your OpenCode config and share the same mem9 API.',
+          guideId: 'opencode',
+        },
+        {
+          name: 'Codex',
+          desc: 'Managed hooks',
+          detail:
+            'Use the Codex plugin to install managed hooks and project overrides backed by mem9.',
+          guideId: 'codex',
+        },
+        {
+          name: 'DeepSeek Harness',
+          desc: 'DSH/Cordis bundle',
+          detail:
+            'Install the @mem9/dsh-plugin bundle for automatic recall, smart ingest, and five memory tools.',
+          guideId: 'deepseek',
+          badge: 'Beta',
+        },
+        {
+          name: 'Dify',
+          desc: 'Agent and workflow platform',
+          detail:
+            'Add mem9 tools to Dify Agent apps and Workflow apps, with one shared space or per-node API keys.',
+          guideId: 'dify',
         },
         {
           name: 'Your Memory',
@@ -2477,32 +6472,34 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
         },
       ],
       ctaLabel: 'Try Your Memory',
-      note: 'Also works with any client that can read or write through the mem9 API layer.',
+      guideCtaLabel: 'Read guide',
+      note:
+        'Custom HTTP clients can also read and write through the mem9 API layer and share the same memory space.',
     },
     benchmark: {
       kicker: 'Benchmark',
       title: 'LoCoMo Benchmark Results',
-      description: 'Evaluating long-conversation memory quality across multi-hop reasoning, single-hop recall, temporal reasoning, open-domain QA, and adversarial robustness.',
-      model: 'qwen3.5-plus',
+      description: 'Evaluating long-conversation memory quality across multi-hop reasoning, temporal reasoning, open-domain QA, and single-hop recall.',
+      model: 'qwen3.6-plus',
       modelLabel: 'Model',
-      overallF1: '58.84%',
-      overallLLM: '71.95%',
-      overallER: '53.76%',
+      overallF1: '43.66%',
+      overallLLM: '86.85%',
+      overallER: '81.43%',
       f1Label: 'F1 Score',
       llmLabel: 'LLM Score',
       erLabel: 'Evidence Recall',
       categoryLabel: 'Category',
       categories: [
-        { name: 'Multi-hop Reasoning', f1: '22.60%', llm: '53.90%', er: '25.1%' },
-        { name: 'Single-hop Recall', f1: '58.18%', llm: '76.01%', er: '67.8%' },
-        { name: 'Temporal Reasoning', f1: '13.79%', llm: '44.79%', er: '18.6%' },
-        { name: 'Open-domain QA', f1: '56.57%', llm: '79.55%', er: '60.1%' },
-        { name: 'Adversarial', f1: '96.19%', llm: 'N/A', er: '57.1%' },
+        { name: 'Multi-hop Reasoning', f1: '17.93%', llm: '83.16%', er: '59.8%' },
+        { name: 'Temporal Reasoning', f1: '50.36%', llm: '89.25%', er: '90.7%' },
+        { name: 'Open-domain QA', f1: '26.70%', llm: '64.58%', er: '56.3%' },
+        { name: 'Single-hop Recall', f1: '51.66%', llm: '89.71%', er: '87.9%' },
       ],
-      source: 'LoCoMo Benchmark — Long-Conversation Memory evaluation framework',
+      source: 'LoCoMo Benchmark: Long-Conversation Memory evaluation framework',
     },
     faq: faqCopyByLocale.en,
     apiPage: apiPageByLocale.en,
+    releaseNotesPage: releaseNotesPageCopyByLocale.en,
     securityPage: {
       meta: {
         title: 'Security & Privacy | mem9',
@@ -2561,42 +6558,56 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       kicker: 'Pricing',
       title: 'Simple, transparent pricing',
       description: 'Start free. Scale when you need to.',
+      docsLinkLabel: 'Read pricing details in Console Docs',
+      featureLabels: [
+        'End users',
+        'Add requests',
+        'Retrieval requests',
+        'Support',
+      ],
       tiers: [
         {
           name: 'Free',
           price: '$0',
           period: '',
           features: [
-            '10,000 memories',
-            '1,000 retrieval API calls / month',
-            'Community support',
+            'Unlimited',
+            '13,000 / month',
+            '1,300 / month',
+            'Community',
           ],
           ctaLabel: 'Get Started',
-          ctaAction: 'alert',
+          ctaAction: 'signin',
         },
         {
           name: 'Starter',
           price: '$9',
           period: ' / mo',
           features: [
-            '50,000 memories',
-            '5,000 retrieval API calls / month',
-            'Email support',
+            'Unlimited',
+            '65,000 / month',
+            '6,500 / month',
+            'Email',
           ],
-          ctaLabel: 'Buy Now',
-          ctaAction: 'alert',
+          ctaLabel: 'Subscribe',
+          ctaAction: 'plan',
+          planSku: 'starter',
+          interval: 'month',
         },
         {
           name: 'Pro',
           price: '$120',
           period: ' / mo',
           features: [
-            'Unlimited memories',
-            '50,000 retrieval API calls / month',
-            'Priority support',
+            'Unlimited',
+            '650,000 / month',
+            '65,000 / month',
+            'Priority',
           ],
-          ctaLabel: 'Buy Now',
-          ctaAction: 'alert',
+          ctaLabel: 'Subscribe',
+          ctaAction: 'plan',
+          planSku: 'pro',
+          interval: 'month',
           highlighted: true,
         },
         {
@@ -2604,15 +6615,15 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
           price: 'Custom',
           period: '',
           features: [
-            'Unlimited memories',
-            'Unlimited API calls',
+            'Unlimited',
+            'Unlimited',
+            'Unlimited',
             'Dedicated support & Custom SLA',
           ],
           ctaLabel: 'Contact Us',
           ctaAction: 'mailto',
         },
       ],
-      alertMessage: 'Stay tuned! It is completely free for now. If you reach a paid tier, we will give you enough credits. Feel free to use it!',
       contactMessage:
         'Email us for enterprise pricing, security reviews, and dedicated support.',
       contactCopyLabel: 'Copy Email',
@@ -2627,10 +6638,12 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       contributing: 'Contributing',
       security: 'Security',
       contact: 'Contact Us',
+      poweredByLabel: 'Powered by TiDB Cloud',
       copyright: 'mem9.ai. Unlimited memory infrastructure for AI agents.',
     },
     aria: {
       home: 'mem9 home',
+      mainMenu: 'Open main menu',
       changeLanguage: 'Change language',
       changeTheme: 'Change theme',
       themeModeLight: 'Theme mode: Light',
@@ -2647,13 +6660,18 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: 'Onboarding instructions copied.',
       copyFailed: 'Copy failed. Please copy the command manually.',
     },
+    pageTools: {
+      copyMarkdown: 'Copy as Markdown',
+      copiedMarkdown: 'Markdown copied',
+      copyMarkdownFailed: 'Copy failed. Please try again.',
+    },
     localeNames,
   },
   zh: {
     meta: {
-      title: 'mem9 - 面向 OpenClaw 的无限记忆基础设施',
+      title: 'mem9 - 面向 AI Agents 的持久记忆',
       description:
-        'mem9.ai 为 OpenClaw 提供无限记忆基础设施，支持持久召回、混合搜索，以及面向 Claude Code、OpenCode、OpenClaw 和自定义工具的多 Agent 上下文共享。',
+        'mem9.ai 为 OpenClaw、Hermes Agent、Dify、Claude Code、OpenCode、Codex 和自定义工具提供共享持久记忆、混合召回和可视化管理界面。',
     },
     nav: {
       home: '首页',
@@ -2662,48 +6680,61 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       benchmark: '基准测试',
       openclaw: 'OpenClaw',
       yourMemory: '你的记忆',
+      yourMemoryDescription: '可视化记忆管理',
+      webConsole: 'Web Console',
+      webConsoleDescription: '管理您的空间、空间链、用量和订单。',
+      login: '登录',
       billing: '定价',
       security: '安全',
       faq: '常见问题',
       github: 'GitHub',
+      xcom: 'X.com',
       docs: '文档',
+      mem9Docs: 'mem9 文档',
+      consoleDocs: 'mem9 Console 文档',
       api: 'API',
+      apiReferences: 'API 参考',
+      howItWork: 'How it work',
+      releaseNotes: '发布说明',
       contact: '联系我们',
     },
     hero: {
       eyebrow: 'MEM9.AI',
       titleLead: '无限记忆',
-      titleAccent: 'for OpenClaw',
+      titleAccent: 'for AI agents',
       subtitle:
-        '你的 Agent 会在每次会话结束后忘掉一切，mem9 负责修复这件事。它提供持久化记忆基础设施，支持混合搜索、共享空间和跨 Agent 召回，从第一次写入一直保留到未来。',
-      poweredByLabel: 'Powered by TiDB Cloud',
-      onboardingLabel: '如何安装',
-      onboardingHint: '把上面这条命令复制给 OpenClaw 即可完成安装，按提示操作会自动生成 API Key，无需注册申请。',
+        '你的 Agent 会在会话之间丢失上下文。mem9 为你使用的 Agent 提供同一层共享记忆，支持混合召回和可视化管理。',
+      guideSelector: {
+        label: '支持你的 Agent 栈',
+        items: guideSelectorItems,
+      },
+      onboardingLabel: '为 OpenClaw 安装',
+      onboardingBadge: '粘贴到 OpenClaw',
+      onboardingHint:
+        'OpenClaw 会自动为你安装 mem9 并申请 <strong>API Key</strong>。',
       onboardingStableLabel: 'Stable',
       onboardingBetaLabel: 'Beta',
       onboardingCommandStable:
         '阅读 https://mem9.ai/SKILL.md ，按照说明为 OpenClaw 安装并配置 mem9',
       onboardingCommandBeta:
         '阅读 https://mem9.ai/beta/SKILL.md ，按照说明为 OpenClaw 安装并配置 mem9',
-      substrateCtaLabel:
-        'Need the backend substrate behind memory? Explore via TiDB Cloud Zero \u2192',
       betaFeature: {
         title: 'Context Engine 支持',
         description:
-          '现在已支持最新的 Context Engine，mem9 能帮助你的 Agent 记住真正重要的内容，并在每个任务里只带入最合适的记忆。这样用户不需要反复重复信息，回复会更准确，提示词也能保持精简。最终效果是 Agent 体验更快、更聚焦，同时减少 token 消耗和无谓成本。',
+          '现在已支持最新的 Context Engine，mem9 能帮助你的 Agent 记住真正重要的内容，并在每个任务里只带入合适的记忆。',
       },
       highlights: [
         {
-          title: '不再遗忘',
-          description: '云端持久记忆可跨越重置、重启和设备切换持续保留。',
+          title: '跨会话持久保存',
+          description: '云端记忆可跨越重置、重启、长期项目和设备切换持续保留。',
         },
         {
-          title: '安全备份',
-          description: '你的 Agent 记忆存放在耐久云存储里，而不是脆弱的本地文件。',
+          title: '跨 Agent 共享',
+          description: '同一个记忆空间可以通过同一把 Key 服务任意 Agent 与 API 客户端。',
         },
         {
-          title: '无缝接入',
-          description: '从一条指令开始，再逐步迁移已有记忆，不会打断现有工作流。',
+          title: '可视化管理',
+          description: '在 mem9.ai 官方界面中审查、分析、导入和导出记忆。',
         },
       ],
     },
@@ -2749,15 +6780,54 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
     },
     platforms: {
       kicker: '平台',
-      title: '一层记忆，覆盖每个 Agent。',
+      title: '共享记忆，覆盖每个 Agent 栈',
       description:
-        'Agent 在切换工具时不该丢掉上下文。mem9 为你的整套 Agent 栈提供共享且持久的记忆层，始终可搜索、可同步、可长期保存。',
+        '让你的 Agent 栈里的运行时和工作流平台共享同一个持久、可搜索的记忆空间。',
       items: [
         {
           name: 'OpenClaw',
-          desc: '无限记忆',
+          desc: 'Memory plugin',
+          detail: '把页面顶部的安装命令粘贴给 OpenClaw，它会自动完成接入。',
+          guideId: 'openclaw',
+        },
+        {
+          name: 'Hermes Agent',
+          desc: 'Memory provider',
+          detail: '安装独立的 Hermes memory provider 插件，并在 Hermes Agent 中启用。',
+          guideId: 'hermes',
+        },
+        {
+          name: 'Claude Code',
+          desc: 'Hooks and skills',
+          detail: '使用 Claude Code 插件，通过 mem9 hooks 持久化和召回记忆。',
+          guideId: 'claude',
+        },
+        {
+          name: 'OpenCode',
+          desc: 'Plugin SDK',
+          detail: '从 OpenCode 配置加载 mem9 集成，并共享同一套 mem9 API。',
+          guideId: 'opencode',
+        },
+        {
+          name: 'Codex',
+          desc: 'Managed hooks',
+          detail: '使用 Codex 插件安装托管 hooks 和项目级覆盖配置，后端由 mem9 支撑。',
+          guideId: 'codex',
+        },
+        {
+          name: 'DeepSeek Harness',
+          desc: 'DSH/Cordis bundle',
           detail:
-            '为你的 OpenClaw Agent 提供永不过期的记忆。回忆过去的对话，复用已经学到的知识，并在一轮又一轮会话中保持一致。',
+            '安装 @mem9/dsh-plugin 插件，获得自动召回、智能摄取和五个记忆工具。',
+          guideId: 'deepseek',
+          badge: 'Beta',
+        },
+        {
+          name: 'Dify',
+          desc: 'Agent 与工作流平台',
+          detail:
+            '为 Dify Agent 应用和 Workflow 应用加入 mem9 工具，支持一个共享空间或节点级 API Key。',
+          guideId: 'dify',
         },
         {
           name: '你的记忆',
@@ -2768,32 +6838,34 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
         },
       ],
       ctaLabel: '试试你的记忆',
-      note: '任何能够通过 mem9 API 层读写的客户端也都可以接入。',
+      guideCtaLabel: '阅读指南',
+      note:
+        '自定义 HTTP 客户端也可以通过 mem9 API 层读写，并共享同一个记忆空间。',
     },
     benchmark: {
       kicker: '基准测试',
       title: 'LoCoMo 基准测试结果',
-      description: '评估长对话记忆质量，涵盖多跳推理、单跳召回、时序推理、开放域问答及对抗鲁棒性。',
-      model: 'qwen3.5-plus',
+      description: '评估长对话记忆质量，涵盖多跳推理、时序推理、开放域问答和单跳召回。',
+      model: 'qwen3.6-plus',
       modelLabel: '模型',
-      overallF1: '58.84%',
-      overallLLM: '71.95%',
-      overallER: '53.76%',
+      overallF1: '43.66%',
+      overallLLM: '86.85%',
+      overallER: '81.43%',
       f1Label: 'F1 分数',
       llmLabel: 'LLM 分数',
       erLabel: '证据召回率',
       categoryLabel: '类别',
       categories: [
-        { name: '多跳推理', f1: '22.60%', llm: '53.90%', er: '25.1%' },
-        { name: '单跳召回', f1: '58.18%', llm: '76.01%', er: '67.8%' },
-        { name: '时序推理', f1: '13.79%', llm: '44.79%', er: '18.6%' },
-        { name: '开放域问答', f1: '56.57%', llm: '79.55%', er: '60.1%' },
-        { name: '对抗测试', f1: '96.19%', llm: 'N/A', er: '57.1%' },
+        { name: '多跳推理', f1: '17.93%', llm: '83.16%', er: '59.8%' },
+        { name: '时序推理', f1: '50.36%', llm: '89.25%', er: '90.7%' },
+        { name: '开放域问答', f1: '26.70%', llm: '64.58%', er: '56.3%' },
+        { name: '单跳召回', f1: '51.66%', llm: '89.71%', er: '87.9%' },
       ],
-      source: 'LoCoMo Benchmark — 长对话记忆评估框架',
+      source: 'LoCoMo Benchmark：长对话记忆评估框架',
     },
     faq: faqCopyByLocale.zh,
     apiPage: apiPageByLocale.zh,
+    releaseNotesPage: releaseNotesPageCopyByLocale.zh,
     securityPage: {
       meta: {
         title: '安全与隐私 | mem9',
@@ -2805,8 +6877,8 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       intro:
         'mem9 的设计目标，是在提供持久云记忆能力的同时，保持清晰的操作边界和稳固的安全基础。',
       bridgeBody:
-        'Memory is often the first state problem in an agent system. When your workflow expands into files, artifacts, and retrieval, drive9 becomes the next layer.',
-      bridgeCtaLabel: 'Explore drive9 \u2192',
+        '记忆通常是 Agent 系统中的第一个状态难题。当你的工作流扩展到文件、产物和检索时，drive9 会成为下一层。',
+      bridgeCtaLabel: '探索 drive9 \u2192',
       dataTitle: 'mem9 如何处理数据',
       dataBody:
         'mem9 会存储记忆数据，帮助 Agent 在跨会话、跨设备和跨工作流时保留有用上下文。相关数据流被限定在产品的核心职责内，即存储、检索和提供记忆，并围绕访问与运维设有清晰的数据处理边界。',
@@ -2847,42 +6919,56 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       kicker: '定价',
       title: '简单透明的定价',
       description: '免费起步，按需扩展。',
+      docsLinkLabel: '在 Console 文档中阅读定价详情',
+      featureLabels: [
+        '终端用户',
+        '添加请求',
+        '检索请求',
+        '支持',
+      ],
       tiers: [
         {
           name: 'Free',
           price: '$0',
           period: '',
           features: [
-            '10,000 条记忆',
-            '1,000 次检索 API 调用 / 月',
-            '社区支持',
+            '不限',
+            '13,000 / 月',
+            '1,300 / 月',
+            '社区',
           ],
           ctaLabel: '开始使用',
-          ctaAction: 'alert',
+          ctaAction: 'signin',
         },
         {
           name: 'Starter',
           price: '$9',
           period: ' / 月',
           features: [
-            '50,000 条记忆',
-            '5,000 次检索 API 调用 / 月',
-            '邮件支持',
+            '不限',
+            '65,000 / 月',
+            '6,500 / 月',
+            '邮件',
           ],
-          ctaLabel: '立即购买',
-          ctaAction: 'alert',
+          ctaLabel: '立即订阅',
+          ctaAction: 'plan',
+          planSku: 'starter',
+          interval: 'month',
         },
         {
           name: 'Pro',
           price: '$120',
           period: ' / 月',
           features: [
-            '无限记忆',
-            '50,000 次检索 API 调用 / 月',
-            '优先支持',
+            '不限',
+            '650,000 / 月',
+            '65,000 / 月',
+            '优先',
           ],
-          ctaLabel: '立即购买',
-          ctaAction: 'alert',
+          ctaLabel: '立即订阅',
+          ctaAction: 'plan',
+          planSku: 'pro',
+          interval: 'month',
           highlighted: true,
         },
         {
@@ -2890,15 +6976,15 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
           price: '自定义',
           period: '',
           features: [
-            '无限记忆',
-            '无限 API 调用',
+            '不限',
+            '不限',
+            '不限',
             '专属支持 & 自定义 SLA',
           ],
           ctaLabel: '联系我们',
           ctaAction: 'mailto',
         },
       ],
-      alertMessage: '敬请期待，现在完全免费，如果您已经到了收费的tier，我们也会给您足够的Credits，请放心使用！',
       contactMessage: '如需企业定价、安全审查或专属支持，请发送邮件联系我们。',
       contactCopyLabel: '复制邮箱',
       contactCopiedMessage: '邮箱地址已复制。',
@@ -2912,10 +6998,12 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       contributing: '参与贡献',
       security: '安全',
       contact: '联系我们',
+      poweredByLabel: '由 TiDB Cloud 提供支持',
       copyright: 'mem9.ai。为 AI Agents 提供无限记忆基础设施。',
     },
     aria: {
       home: 'mem9 首页',
+      mainMenu: '打开主菜单',
       changeLanguage: '切换语言',
       changeTheme: '切换主题',
       themeModeLight: '主题模式：浅色',
@@ -2932,13 +7020,18 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: '已复制接入说明。',
       copyFailed: '复制失败，请手动复制命令。',
     },
+    pageTools: {
+      copyMarkdown: '复制为 Markdown',
+      copiedMarkdown: 'Markdown 已复制',
+      copyMarkdownFailed: '复制失败，请重试。',
+    },
     localeNames,
   },
   'zh-Hant': {
     meta: {
       title: 'mem9 - 面向 OpenClaw 的無限記憶基礎設施',
       description:
-        'mem9.ai 為 OpenClaw 提供無限記憶基礎設施，支援持久召回、混合搜尋，以及面向 Claude Code、OpenCode、OpenClaw 和自訂工具的多 Agent 上下文共享。',
+        'mem9.ai 為 OpenClaw 提供無限記憶基礎設施，支援持久召回、混合搜尋，以及面向 Dify、Claude Code、OpenCode、OpenClaw 和自訂工具的多 Agent 上下文共享。',
     },
     nav: {
       home: '首頁',
@@ -2947,31 +7040,44 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       benchmark: '基準測試',
       openclaw: 'OpenClaw',
       yourMemory: '你的記憶',
+      yourMemoryDescription: '可視化記憶管理',
+      webConsole: 'Web Console',
+      webConsoleDescription: '管理您的空間、空間鏈、用量和訂單。',
+      login: '登入',
       billing: '定價',
       security: '安全',
       faq: '常見問題',
       github: 'GitHub',
+      xcom: 'X.com',
       docs: '文檔',
+      mem9Docs: 'mem9 文檔',
+      consoleDocs: 'mem9 Console 文檔',
       api: 'API',
+      apiReferences: 'API 參考',
+      howItWork: 'How it work',
+      releaseNotes: '發布說明',
       contact: '聯絡我們',
     },
     hero: {
       eyebrow: 'MEM9.AI',
       titleLead: '無限記憶',
-      titleAccent: 'for OpenClaw',
+      titleAccent: 'for AI agents',
       subtitle:
-        '你的 Agent 會在每次會話結束後忘掉一切，mem9 負責修復這件事。它提供持久化記憶基礎設施，支援混合搜尋、共享空間和跨 Agent 召回，從第一次寫入一路保留到未來。',
-      poweredByLabel: 'Powered by TiDB Cloud',
-      onboardingLabel: '如何安裝',
-      onboardingHint: '把上面這條指令複製給 OpenClaw 即可完成安裝，按提示操作會自動產生 API Key，無需註冊申請。',
+        '你的 Agent 會在會話之間遺忘所有內容。mem9 為你使用的 Agent 提供同一層共享記憶，支援混合召回和可視化管理。',
+      guideSelector: {
+        label: '支援你的 Agent 堆疊',
+        items: guideSelectorItems,
+      },
+      onboardingLabel: '為 OpenClaw 安裝',
+      onboardingBadge: '貼上到 OpenClaw',
+      onboardingHint:
+        'OpenClaw 會自動為你安裝 mem9 並申請 <strong>API Key</strong>。',
       onboardingStableLabel: 'Stable',
       onboardingBetaLabel: 'Beta',
       onboardingCommandStable:
         '閱讀 https://mem9.ai/SKILL.md，按照說明為 OpenClaw 安裝並配置 mem9',
       onboardingCommandBeta:
         '閱讀 https://mem9.ai/beta/SKILL.md，按照說明為 OpenClaw 安裝並配置 mem9',
-      substrateCtaLabel:
-        'Need the backend substrate behind memory? Explore via TiDB Cloud Zero \u2192',
       betaFeature: {
         title: 'Context Engine 支援',
         description:
@@ -3034,15 +7140,59 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
     },
     platforms: {
       kicker: '平台',
-      title: '一層記憶，覆蓋每個 Agent。',
+      title: '共享記憶，覆蓋每個 Agent 堆疊',
       description:
-        'Agent 在切換工具時不該丟掉上下文。mem9 為你的整套 Agent 堆疊提供共享且持久的記憶層，始終可搜尋、可同步、可長期保存。',
+        'mem9 為你的 Agent 執行環境與工作流平台提供共享且持久的記憶層，始終可搜尋、可同步、可長期保存。',
       items: [
         {
           name: 'OpenClaw',
-          desc: '無限記憶',
+          desc: '記憶外掛',
           detail:
-            '為你的 OpenClaw Agent 提供永不過期的記憶。回想過去的對話，重用已學到的知識，並在一輪又一輪會話中保持一致。',
+            '把頁面頂部的安裝命令貼給 OpenClaw，它會自動完成接入。',
+          guideId: 'openclaw',
+        },
+        {
+          name: 'Hermes Agent',
+          desc: '記憶提供者',
+          detail:
+            '安裝獨立的 Hermes memory provider 外掛，並在 Hermes Agent 中啟用。',
+          guideId: 'hermes',
+        },
+        {
+          name: 'Claude Code',
+          desc: 'Hooks 與技能',
+          detail:
+            '使用 Claude Code 外掛，透過 mem9 hooks 持久化並召回記憶。',
+          guideId: 'claude',
+        },
+        {
+          name: 'OpenCode',
+          desc: 'Plugin SDK',
+          detail:
+            '從 OpenCode 設定載入 mem9 整合，並共享同一套 mem9 API。',
+          guideId: 'opencode',
+        },
+        {
+          name: 'Codex',
+          desc: '託管 hooks',
+          detail:
+            '使用 Codex 外掛安裝託管 hooks 和專案級覆寫設定，後端由 mem9 支撐。',
+          guideId: 'codex',
+        },
+        {
+          name: 'DeepSeek Harness',
+          desc: 'DSH/Cordis bundle',
+          detail:
+            '安裝 @mem9/dsh-plugin 外掛，獲得自動召回、智慧攝取與五個記憶工具。',
+          guideId: 'deepseek',
+          badge: 'Beta',
+        },
+        {
+          name: 'Dify',
+          desc: 'Agent 與工作流平台',
+          detail:
+            '為 Dify Agent 應用與 Workflow 應用加入 mem9 工具，支援一個共享空間或節點級 API Key。',
+          guideId: 'dify',
         },
         {
           name: '你的記憶',
@@ -3053,32 +7203,34 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
         },
       ],
       ctaLabel: '試試你的記憶',
-      note: '任何能夠透過 mem9 API 層讀寫的客戶端也都可以接入。',
+      guideCtaLabel: '閱讀指南',
+      note:
+        '自訂 HTTP 客戶端也可以透過 mem9 API 層讀寫，並共享同一個記憶空間。',
     },
     benchmark: {
       kicker: '基準測試',
       title: 'LoCoMo 基準測試結果',
-      description: '評估長對話記憶品質，涵蓋多跳推理、單跳召回、時序推理、開放域問答及對抗穩健性。',
-      model: 'qwen3.5-plus',
+      description: '評估長對話記憶品質，涵蓋多跳推理、時序推理、開放域問答和單跳召回。',
+      model: 'qwen3.6-plus',
       modelLabel: '模型',
-      overallF1: '58.84%',
-      overallLLM: '71.95%',
-      overallER: '53.76%',
+      overallF1: '43.66%',
+      overallLLM: '86.85%',
+      overallER: '81.43%',
       f1Label: 'F1 分數',
       llmLabel: 'LLM 分數',
       erLabel: '證據召回率',
       categoryLabel: '類別',
       categories: [
-        { name: '多跳推理', f1: '22.60%', llm: '53.90%', er: '25.1%' },
-        { name: '單跳召回', f1: '58.18%', llm: '76.01%', er: '67.8%' },
-        { name: '時序推理', f1: '13.79%', llm: '44.79%', er: '18.6%' },
-        { name: '開放域問答', f1: '56.57%', llm: '79.55%', er: '60.1%' },
-        { name: '對抗測試', f1: '96.19%', llm: 'N/A', er: '57.1%' },
+        { name: '多跳推理', f1: '17.93%', llm: '83.16%', er: '59.8%' },
+        { name: '時序推理', f1: '50.36%', llm: '89.25%', er: '90.7%' },
+        { name: '開放域問答', f1: '26.70%', llm: '64.58%', er: '56.3%' },
+        { name: '單跳召回', f1: '51.66%', llm: '89.71%', er: '87.9%' },
       ],
-      source: 'LoCoMo Benchmark — 長對話記憶評估框架',
+      source: 'LoCoMo Benchmark：長對話記憶評估框架',
     },
     faq: faqCopyByLocale['zh-Hant'],
     apiPage: apiPageByLocale['zh-Hant'],
+    releaseNotesPage: releaseNotesPageCopyByLocale['zh-Hant'],
     securityPage: {
       meta: {
         title: '安全與隱私 | mem9',
@@ -3090,8 +7242,8 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       intro:
         'mem9 的設計目標，是在提供持久雲端記憶能力的同時，維持清楚的操作邊界與穩固的安全基礎。',
       bridgeBody:
-        'Memory is often the first state problem in an agent system. When your workflow expands into files, artifacts, and retrieval, drive9 becomes the next layer.',
-      bridgeCtaLabel: 'Explore drive9 \u2192',
+        '記憶通常是 Agent 系統中的第一個狀態難題。當你的工作流擴展到檔案、產物和檢索時，drive9 會成為下一層。',
+      bridgeCtaLabel: '探索 drive9 \u2192',
       dataTitle: 'mem9 如何處理資料',
       dataBody:
         'mem9 會儲存記憶資料，幫助 Agent 在跨會話、跨裝置與跨工作流程時保留有用上下文。相關資料流被限定在產品的核心職責內，也就是儲存、檢索與提供記憶，並圍繞存取與營運設有清楚的資料處理邊界。',
@@ -3132,42 +7284,56 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       kicker: '定價',
       title: '簡單透明的定價',
       description: '免費起步，按需擴展。',
+      docsLinkLabel: '在 Console 文檔中閱讀定價詳情',
+      featureLabels: [
+        '終端使用者',
+        '新增請求',
+        '檢索請求',
+        '支援',
+      ],
       tiers: [
         {
           name: 'Free',
           price: '$0',
           period: '',
           features: [
-            '10,000 條記憶',
-            '1,000 次檢索 API 呼叫 / 月',
-            '社群支援',
+            '不限',
+            '13,000 / 月',
+            '1,300 / 月',
+            '社群',
           ],
           ctaLabel: '開始使用',
-          ctaAction: 'alert',
+          ctaAction: 'signin',
         },
         {
           name: 'Starter',
           price: '$9',
           period: ' / 月',
           features: [
-            '50,000 條記憶',
-            '5,000 次檢索 API 呼叫 / 月',
-            '電郵支援',
+            '不限',
+            '65,000 / 月',
+            '6,500 / 月',
+            '電郵',
           ],
-          ctaLabel: '立即購買',
-          ctaAction: 'alert',
+          ctaLabel: '立即訂閱',
+          ctaAction: 'plan',
+          planSku: 'starter',
+          interval: 'month',
         },
         {
           name: 'Pro',
           price: '$120',
           period: ' / 月',
           features: [
-            '無限記憶',
-            '50,000 次檢索 API 呼叫 / 月',
-            '優先支援',
+            '不限',
+            '650,000 / 月',
+            '65,000 / 月',
+            '優先',
           ],
-          ctaLabel: '立即購買',
-          ctaAction: 'alert',
+          ctaLabel: '立即訂閱',
+          ctaAction: 'plan',
+          planSku: 'pro',
+          interval: 'month',
           highlighted: true,
         },
         {
@@ -3175,15 +7341,15 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
           price: '自訂',
           period: '',
           features: [
-            '無限記憶',
-            '無限 API 呼叫',
+            '不限',
+            '不限',
+            '不限',
             '專屬支援 & 自訂 SLA',
           ],
           ctaLabel: '聯絡我們',
           ctaAction: 'mailto',
         },
       ],
-      alertMessage: '敬請期待，現在完全免費，如果您已經到了收費的方案，我們也會給您足夠的 Credits，請放心使用！',
       contactMessage: '如需企業定價、安全審查或專屬支援，請發送郵件與我們聯絡。',
       contactCopyLabel: '複製信箱',
       contactCopiedMessage: '信箱地址已複製。',
@@ -3197,10 +7363,12 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       contributing: '參與貢獻',
       security: '安全',
       contact: '聯絡我們',
+      poweredByLabel: '由 TiDB Cloud 提供支援',
       copyright: 'mem9.ai。為 AI Agents 提供無限記憶基礎設施。',
     },
     aria: {
       home: 'mem9 首頁',
+      mainMenu: '開啟主選單',
       changeLanguage: '切換語言',
       changeTheme: '切換主題',
       themeModeLight: '主題模式：淺色',
@@ -3217,13 +7385,18 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: '已複製接入說明。',
       copyFailed: '複製失敗，請手動複製命令。',
     },
+    pageTools: {
+      copyMarkdown: '複製為 Markdown',
+      copiedMarkdown: 'Markdown 已複製',
+      copyMarkdownFailed: '複製失敗，請重試。',
+    },
     localeNames,
   },
   ja: {
     meta: {
       title: 'mem9 - OpenClaw 向け無制限メモリ基盤',
       description:
-        'mem9.ai は OpenClaw 向けの無制限メモリ基盤です。永続リコール、ハイブリッド検索、そして Claude Code、OpenCode、OpenClaw、独自ツール向けのマルチエージェント文脈共有を提供します。',
+        'mem9.ai は OpenClaw 向けの無制限メモリ基盤です。永続リコール、ハイブリッド検索、そして Dify、Claude Code、OpenCode、OpenClaw、独自ツール向けのマルチエージェント文脈共有を提供します。',
     },
     nav: {
       home: 'ホーム',
@@ -3232,31 +7405,44 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       benchmark: 'ベンチマーク',
       openclaw: 'OpenClaw',
       yourMemory: 'あなたの記憶',
+      yourMemoryDescription: 'ビジュアルなメモリ管理',
+      webConsole: 'Web Console',
+      webConsoleDescription: 'スペース、スペースチェーン、使用量、注文を管理します。',
+      login: 'ログイン',
       billing: '料金',
       security: 'セキュリティ',
       faq: 'よくある質問',
       github: 'GitHub',
+      xcom: 'X.com',
       docs: 'ドキュメント',
+      mem9Docs: 'mem9 ドキュメント',
+      consoleDocs: 'mem9 Console ドキュメント',
       api: 'API',
+      apiReferences: 'API リファレンス',
+      howItWork: 'How it work',
+      releaseNotes: 'リリースノート',
       contact: 'お問い合わせ',
     },
     hero: {
       eyebrow: 'MEM9.AI',
       titleLead: 'Unlimited memory',
-      titleAccent: 'for OpenClaw',
+      titleAccent: 'for AI agents',
       subtitle:
-        'エージェントはセッションが変わるたびにすべてを忘れます。mem9 はそれを解決します。ハイブリッド検索、共有スペース、エージェント間リコールを備えた永続メモリ基盤で、最初の書き込みからずっと記憶を保ちます。',
-      poweredByLabel: 'Powered by TiDB Cloud',
-      onboardingLabel: 'インストール方法',
-      onboardingHint: '上のコマンドを OpenClaw にコピーしてください。案内に従えば API Key が自動生成されます \u2014 登録不要です。',
+        'エージェントはセッションが変わるたびにすべてを忘れます。mem9 は、ハイブリッド検索とビジュアルダッシュボードを備えた共有メモリレイヤーを、利用中のエージェントに提供します。',
+      guideSelector: {
+        label: 'エージェントスタックに対応',
+        items: guideSelectorItems,
+      },
+      onboardingLabel: 'OpenClaw にインストール',
+      onboardingBadge: 'OpenClaw に貼り付け',
+      onboardingHint:
+        'OpenClaw が自動的に mem9 をインストールし、<strong>API Key</strong> を発行します。',
       onboardingStableLabel: 'Stable',
       onboardingBetaLabel: 'Beta',
       onboardingCommandStable:
         'https://mem9.ai/SKILL.md を読み、手順に沿って OpenClaw 向けに mem9 をインストールして設定してください',
       onboardingCommandBeta:
         'https://mem9.ai/beta/SKILL.md を読み、手順に沿って OpenClaw 向けに mem9 をインストールして設定してください',
-      substrateCtaLabel:
-        'Need the backend substrate behind memory? Explore via TiDB Cloud Zero \u2192',
       betaFeature: {
         title: 'Context Engine サポート',
         description:
@@ -3281,7 +7467,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       ],
     },
     trust: {
-      title: 'Security & Privacy',
+      title: 'セキュリティとプライバシー',
       body:
         'mem9 は本番利用を前提に、エンタープライズグレードのクラウド基盤上で構築されています。通信時と保存時の暗号化、アクセス制御、監査性、そして明確なデータ取り扱い境界を備えています。',
       supporting: '詳しくはセキュリティ概要とホワイトペーパーをご覧ください。',
@@ -3322,15 +7508,59 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
     },
     platforms: {
       kicker: '対応環境',
-      title: 'ひとつのメモリレイヤーを、すべてのエージェントへ。',
+      title: '共有メモリを、すべてのエージェントスタックへ',
       description:
-        'ツールを切り替えるたびにエージェントが文脈を失うべきではありません。mem9 はスタック内のすべてのエージェントに、永続的で検索可能、常に同期された共有メモリを提供します。',
+        'mem9 はエージェントランタイムとワークフロープラットフォームに、永続的で検索可能、常に同期された共有メモリを提供します。',
       items: [
         {
           name: 'OpenClaw',
-          desc: 'Unlimited memory',
+          desc: 'メモリプラグイン',
           detail:
-            'OpenClaw エージェントに期限のない記憶を与えます。過去の会話を呼び戻し、学習済みの知識を再利用し、セッションをまたいで一貫性を保てます。',
+            'ページ上部のインストールコマンドを OpenClaw に貼り付けるだけで自動的にセットアップされます。',
+          guideId: 'openclaw',
+        },
+        {
+          name: 'Hermes Agent',
+          desc: 'メモリプロバイダー',
+          detail:
+            'スタンドアロンの Hermes memory provider プラグインをインストールし、Hermes Agent で有効化します。',
+          guideId: 'hermes',
+        },
+        {
+          name: 'Claude Code',
+          desc: 'Hooks とスキル',
+          detail:
+            'Claude Code プラグインパッケージを使い、mem9 hooks 経由でメモリを保存してリコールします。',
+          guideId: 'claude',
+        },
+        {
+          name: 'OpenCode',
+          desc: 'Plugin SDK',
+          detail:
+            'OpenCode 設定から mem9 OpenCode 連携を読み込み、同じ mem9 API を共有します。',
+          guideId: 'opencode',
+        },
+        {
+          name: 'Codex',
+          desc: '管理フック',
+          detail:
+            'Codex プラグインで mem9 を基盤とする管理 hooks とプロジェクト上書き設定を導入します。',
+          guideId: 'codex',
+        },
+        {
+          name: 'DeepSeek Harness',
+          desc: 'DSH/Cordis bundle',
+          detail:
+            '@mem9/dsh-plugin バンドルをインストールし、自動リコール、スマートインジェスト、5つのメモリツールを利用できます。',
+          guideId: 'deepseek',
+          badge: 'Beta',
+        },
+        {
+          name: 'Dify',
+          desc: 'エージェントとワークフローのプラットフォーム',
+          detail:
+            'Dify の Agent アプリと Workflow アプリに mem9 ツールを追加し、共有スペースまたはノード別 API キーで使えます。',
+          guideId: 'dify',
         },
         {
           name: 'あなたの記憶',
@@ -3341,45 +7571,47 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
         },
       ],
       ctaLabel: 'あなたの記憶を試す',
-      note: 'mem9 API レイヤー経由で読み書きできるクライアントなら、そのまま利用できます。',
+      guideCtaLabel: 'ガイドを読む',
+      note:
+        'カスタム HTTP クライアントも mem9 API レイヤーを通じて読み書きでき、同じメモリ空間を共有できます。',
     },
     benchmark: {
       kicker: 'ベンチマーク',
       title: 'LoCoMo ベンチマーク結果',
-      description: 'マルチホップ推論、シングルホップ想起、時系列推論、オープンドメインQA、敵対的堅牢性にわたる長文会話メモリ品質の評価。',
-      model: 'qwen3.5-plus',
+      description: 'マルチホップ推論、時系列推論、オープンドメインQA、シングルホップ想起にわたる長文会話メモリ品質の評価。',
+      model: 'qwen3.6-plus',
       modelLabel: 'モデル',
-      overallF1: '58.84%',
-      overallLLM: '71.95%',
-      overallER: '53.76%',
+      overallF1: '43.66%',
+      overallLLM: '86.85%',
+      overallER: '81.43%',
       f1Label: 'F1 スコア',
       llmLabel: 'LLM スコア',
       erLabel: '証拠再現率',
       categoryLabel: 'カテゴリ',
       categories: [
-        { name: 'マルチホップ推論', f1: '22.60%', llm: '53.90%', er: '25.1%' },
-        { name: 'シングルホップ想起', f1: '58.18%', llm: '76.01%', er: '67.8%' },
-        { name: '時系列推論', f1: '13.79%', llm: '44.79%', er: '18.6%' },
-        { name: 'オープンドメインQA', f1: '56.57%', llm: '79.55%', er: '60.1%' },
-        { name: '敵対的テスト', f1: '96.19%', llm: 'N/A', er: '57.1%' },
+        { name: 'マルチホップ推論', f1: '17.93%', llm: '83.16%', er: '59.8%' },
+        { name: '時系列推論', f1: '50.36%', llm: '89.25%', er: '90.7%' },
+        { name: 'オープンドメインQA', f1: '26.70%', llm: '64.58%', er: '56.3%' },
+        { name: 'シングルホップ想起', f1: '51.66%', llm: '89.71%', er: '87.9%' },
       ],
-      source: 'LoCoMo Benchmark — 長文会話メモリ評価フレームワーク',
+      source: 'LoCoMo Benchmark：長文会話メモリ評価フレームワーク',
     },
     faq: faqCopyByLocale.ja,
     apiPage: apiPageByLocale.ja,
+    releaseNotesPage: releaseNotesPageCopyByLocale.ja,
     securityPage: {
       meta: {
         title: 'Security & Privacy | mem9',
         description:
           'mem9 のデータ取り扱い、暗号化、アクセス制御、運用境界への考え方を紹介します。',
       },
-      kicker: 'Security',
-      title: 'Security & Privacy',
+      kicker: 'セキュリティ',
+      title: 'セキュリティとプライバシー',
       intro:
         'mem9 は、永続クラウドメモリの利点を提供しながら、明確な運用境界と強固なセキュリティ基盤を保つよう設計されています。',
       bridgeBody:
-        'Memory is often the first state problem in an agent system. When your workflow expands into files, artifacts, and retrieval, drive9 becomes the next layer.',
-      bridgeCtaLabel: 'Explore drive9 \u2192',
+        'メモリはエージェントシステムにおいて最初に直面する状態管理の課題になりがちです。ワークフローがファイル、アーティファクト、検索へと広がるとき、drive9 が次のレイヤーになります。',
+      bridgeCtaLabel: 'drive9 を見る \u2192',
       dataTitle: 'mem9 のデータ取り扱い',
       dataBody:
         'mem9 は、エージェントがセッション、デバイス、ワークフローをまたいで有用な文脈を保てるようにメモリデータを保存します。データフローはその役割に絞られており、保存、検索、提供という機能の周囲に明確なデータ取り扱い境界を設けています。',
@@ -3420,42 +7652,56 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       kicker: '料金',
       title: 'シンプルで透明な料金体系',
       description: '無料で始めて、必要に応じてスケール。',
+      docsLinkLabel: 'Console ドキュメントで料金の詳細を読む',
+      featureLabels: [
+        'エンドユーザー',
+        '追加リクエスト',
+        '検索リクエスト',
+        'サポート',
+      ],
       tiers: [
         {
           name: 'Free',
           price: '$0',
           period: '',
           features: [
-            '10,000 メモリ',
-            '1,000 検索 API コール / 月',
-            'コミュニティサポート',
+            '無制限',
+            '13,000 / 月',
+            '1,300 / 月',
+            'コミュニティ',
           ],
           ctaLabel: '始める',
-          ctaAction: 'alert',
+          ctaAction: 'signin',
         },
         {
           name: 'Starter',
           price: '$9',
           period: ' / 月',
           features: [
-            '50,000 メモリ',
-            '5,000 検索 API コール / 月',
-            'メールサポート',
+            '無制限',
+            '65,000 / 月',
+            '6,500 / 月',
+            'メール',
           ],
-          ctaLabel: '購入する',
-          ctaAction: 'alert',
+          ctaLabel: '購読する',
+          ctaAction: 'plan',
+          planSku: 'starter',
+          interval: 'month',
         },
         {
           name: 'Pro',
           price: '$120',
           period: ' / 月',
           features: [
-            '無制限メモリ',
-            '50,000 検索 API コール / 月',
-            '優先サポート',
+            '無制限',
+            '650,000 / 月',
+            '65,000 / 月',
+            '優先',
           ],
-          ctaLabel: '購入する',
-          ctaAction: 'alert',
+          ctaLabel: '購読する',
+          ctaAction: 'plan',
+          planSku: 'pro',
+          interval: 'month',
           highlighted: true,
         },
         {
@@ -3463,15 +7709,15 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
           price: 'カスタム',
           period: '',
           features: [
-            '無制限メモリ',
-            '無制限 API コール',
+            '無制限',
+            '無制限',
+            '無制限',
             '専任サポート & カスタム SLA',
           ],
           ctaLabel: 'お問い合わせ',
           ctaAction: 'mailto',
         },
       ],
-      alertMessage: 'もうすぐ公開です！現在は完全無料です。有料プランに達した場合も、十分なクレジットを提供しますので、安心してご利用ください！',
       contactMessage:
         'エンタープライズ向け料金、セキュリティレビュー、専任サポートのご相談はメールでご連絡ください。',
       contactCopyLabel: 'メールアドレスをコピー',
@@ -3487,10 +7733,12 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       contributing: 'コントリビュート',
       security: 'セキュリティ',
       contact: 'お問い合わせ',
+      poweredByLabel: 'TiDB Cloud で稼働',
       copyright: 'mem9.ai。AI エージェント向けの無制限メモリ基盤。',
     },
     aria: {
       home: 'mem9 ホーム',
+      mainMenu: 'メインメニューを開く',
       changeLanguage: '言語を切り替える',
       changeTheme: 'テーマを切り替える',
       themeModeLight: 'テーマモード: ライト',
@@ -3507,13 +7755,18 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: '導入手順をコピーしました。',
       copyFailed: 'コピーに失敗しました。手動でコピーしてください。',
     },
+    pageTools: {
+      copyMarkdown: 'Markdown としてコピー',
+      copiedMarkdown: 'Markdown をコピーしました',
+      copyMarkdownFailed: 'コピーに失敗しました。もう一度お試しください。',
+    },
     localeNames,
   },
   ko: {
     meta: {
       title: 'mem9 - OpenClaw를 위한 무제한 메모리 인프라',
       description:
-        'mem9.ai는 OpenClaw를 위한 무제한 메모리 인프라입니다. 지속 리콜, 하이브리드 검색, 그리고 Claude Code, OpenCode, OpenClaw 및 커스텀 도구를 위한 멀티 에이전트 컨텍스트 공유를 제공합니다.',
+        'mem9.ai는 OpenClaw를 위한 무제한 메모리 인프라입니다. 지속 리콜, 하이브리드 검색, 그리고 Dify, Claude Code, OpenCode, OpenClaw 및 커스텀 도구를 위한 멀티 에이전트 컨텍스트 공유를 제공합니다.',
     },
     nav: {
       home: '홈',
@@ -3522,31 +7775,44 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       benchmark: '벤치마크',
       openclaw: 'OpenClaw',
       yourMemory: '당신의 기억',
+      yourMemoryDescription: '시각적 메모리 관리',
+      webConsole: 'Web Console',
+      webConsoleDescription: '스페이스, 스페이스 체인, 사용량, 주문을 관리합니다.',
+      login: '로그인',
       billing: '요금',
       security: '보안',
       faq: '자주 묻는 질문',
       github: 'GitHub',
+      xcom: 'X.com',
       docs: '문서',
+      mem9Docs: 'mem9 문서',
+      consoleDocs: 'mem9 Console 문서',
       api: 'API',
+      apiReferences: 'API 레퍼런스',
+      howItWork: 'How it work',
+      releaseNotes: '릴리스 노트',
       contact: '문의하기',
     },
     hero: {
       eyebrow: 'MEM9.AI',
       titleLead: '무제한 메모리',
-      titleAccent: 'for OpenClaw',
+      titleAccent: 'for AI agents',
       subtitle:
-        '에이전트는 세션이 바뀔 때마다 모든 것을 잊습니다. mem9가 이를 해결합니다. 하이브리드 검색, 공유 공간, 에이전트 간 리콜을 갖춘 지속 메모리 인프라로 첫 번째 기록부터 계속 기억을 유지합니다.',
-      poweredByLabel: 'Powered by TiDB Cloud',
-      onboardingLabel: '설치 방법',
-      onboardingHint: '위 명령어를 OpenClaw 에 복사하세요. 안내에 따라 진행하면 API Key 가 자동 생성됩니다 \u2014 가입 불필요.',
+        '에이전트는 세션이 바뀔 때마다 모든 것을 잊습니다. mem9는 사용 중인 에이전트에 하이브리드 리콜과 시각적 대시보드를 갖춘 공유 메모리 레이어를 제공합니다.',
+      guideSelector: {
+        label: '에이전트 스택과 연동',
+        items: guideSelectorItems,
+      },
+      onboardingLabel: 'OpenClaw에 설치',
+      onboardingBadge: 'OpenClaw에 붙여넣기',
+      onboardingHint:
+        'OpenClaw가 자동으로 mem9를 설치하고 <strong>API Key</strong>를 발급합니다.',
       onboardingStableLabel: 'Stable',
       onboardingBetaLabel: 'Beta',
       onboardingCommandStable:
         'https://mem9.ai/SKILL.md 를 읽고 안내에 따라 OpenClaw용 mem9를 설치하고 설정하세요',
       onboardingCommandBeta:
         'https://mem9.ai/beta/SKILL.md 를 읽고 안내에 따라 OpenClaw용 mem9를 설치하고 설정하세요',
-      substrateCtaLabel:
-        'Need the backend substrate behind memory? Explore via TiDB Cloud Zero \u2192',
       betaFeature: {
         title: 'Context Engine 지원',
         description:
@@ -3568,7 +7834,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       ],
     },
     trust: {
-      title: 'Security & Privacy',
+      title: '보안 및 개인정보 보호',
       body:
         'mem9는 프로덕션 사용을 위해 엔터프라이즈급 클라우드 인프라 위에 구축되었으며, 전송 중 및 저장 시 암호화, 접근 제어, 감사 가능성, 그리고 명확한 데이터 처리 경계를 갖추고 있습니다.',
       supporting: '보안 개요와 백서에서 더 자세히 확인할 수 있습니다.',
@@ -3609,15 +7875,59 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
     },
     platforms: {
       kicker: '플랫폼',
-      title: '하나의 메모리 레이어. 모든 에이전트.',
+      title: '공유 메모리, 모든 에이전트 스택에',
       description:
-        '도구를 바꿀 때마다 에이전트가 컨텍스트를 잃어서는 안 됩니다. mem9는 스택 전체의 에이전트에게 공유되고 지속적이며, 검색 가능하고 항상 동기화된 메모리를 제공합니다.',
+        'mem9는 에이전트 런타임과 워크플로 플랫폼에 공유되고 지속적이며, 검색 가능하고 항상 동기화된 메모리를 제공합니다.',
       items: [
         {
           name: 'OpenClaw',
-          desc: 'Unlimited memory',
+          desc: '메모리 플러그인',
           detail:
-            'OpenClaw 에이전트에 만료되지 않는 메모리를 제공합니다. 이전 대화를 다시 불러오고, 배운 지식을 재사용하며, 세션이 바뀌어도 일관성을 유지합니다.',
+            '페이지 상단의 설치 명령어를 OpenClaw에 붙여넣으면 자동으로 설정됩니다.',
+          guideId: 'openclaw',
+        },
+        {
+          name: 'Hermes Agent',
+          desc: '메모리 제공자',
+          detail:
+            '독립형 Hermes memory provider 플러그인을 설치하고 Hermes Agent에서 활성화합니다.',
+          guideId: 'hermes',
+        },
+        {
+          name: 'Claude Code',
+          desc: '후크와 스킬',
+          detail:
+            'Claude Code 플러그인 패키지로 mem9 후크를 통해 메모리를 저장하고 리콜합니다.',
+          guideId: 'claude',
+        },
+        {
+          name: 'OpenCode',
+          desc: 'Plugin SDK',
+          detail:
+            'OpenCode 설정에서 mem9 OpenCode 통합을 로드하고 같은 mem9 API를 공유합니다.',
+          guideId: 'opencode',
+        },
+        {
+          name: 'Codex',
+          desc: '관리형 후크',
+          detail:
+            'Codex 플러그인으로 mem9 기반의 관리형 후크와 프로젝트 재정의 설정을 설치합니다.',
+          guideId: 'codex',
+        },
+        {
+          name: 'DeepSeek Harness',
+          desc: 'DSH/Cordis bundle',
+          detail:
+            '@mem9/dsh-plugin 번들을 설치하여 자동 리콜, 스마트 인제스트, 다섯 가지 메모리 도구를 사용하세요.',
+          guideId: 'deepseek',
+          badge: 'Beta',
+        },
+        {
+          name: 'Dify',
+          desc: '에이전트 및 워크플로 플랫폼',
+          detail:
+            'Dify Agent 앱과 Workflow 앱에 mem9 도구를 추가하고 공유 공간 또는 노드별 API 키로 사용할 수 있습니다.',
+          guideId: 'dify',
         },
         {
           name: '당신의 기억',
@@ -3628,45 +7938,47 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
         },
       ],
       ctaLabel: '당신의 기억 사용해보기',
-      note: 'mem9 API 레이어를 통해 읽고 쓸 수 있는 모든 클라이언트와도 함께 동작합니다.',
+      guideCtaLabel: '가이드 읽기',
+      note:
+        '커스텀 HTTP 클라이언트도 mem9 API 레이어를 통해 읽고 쓸 수 있으며 같은 메모리 공간을 공유합니다.',
     },
     benchmark: {
       kicker: '벤치마크',
       title: 'LoCoMo 벤치마크 결과',
-      description: '멀티홉 추론, 싱글홉 리콜, 시간적 추론, 오픈도메인 QA, 적대적 견고성에 걸쳐 장문 대화 메모리 품질을 평가합니다.',
-      model: 'qwen3.5-plus',
+      description: '멀티홉 추론, 시간적 추론, 오픈도메인 QA, 싱글홉 리콜에 걸쳐 장문 대화 메모리 품질을 평가합니다.',
+      model: 'qwen3.6-plus',
       modelLabel: '모델',
-      overallF1: '58.84%',
-      overallLLM: '71.95%',
-      overallER: '53.76%',
+      overallF1: '43.66%',
+      overallLLM: '86.85%',
+      overallER: '81.43%',
       f1Label: 'F1 점수',
       llmLabel: 'LLM 점수',
       erLabel: '증거 재현율',
       categoryLabel: '카테고리',
       categories: [
-        { name: '멀티홉 추론', f1: '22.60%', llm: '53.90%', er: '25.1%' },
-        { name: '싱글홉 리콜', f1: '58.18%', llm: '76.01%', er: '67.8%' },
-        { name: '시간적 추론', f1: '13.79%', llm: '44.79%', er: '18.6%' },
-        { name: '오픈도메인 QA', f1: '56.57%', llm: '79.55%', er: '60.1%' },
-        { name: '적대적 테스트', f1: '96.19%', llm: 'N/A', er: '57.1%' },
+        { name: '멀티홉 추론', f1: '17.93%', llm: '83.16%', er: '59.8%' },
+        { name: '시간적 추론', f1: '50.36%', llm: '89.25%', er: '90.7%' },
+        { name: '오픈도메인 QA', f1: '26.70%', llm: '64.58%', er: '56.3%' },
+        { name: '싱글홉 리콜', f1: '51.66%', llm: '89.71%', er: '87.9%' },
       ],
-      source: 'LoCoMo Benchmark — 장문 대화 메모리 평가 프레임워크',
+      source: 'LoCoMo Benchmark: 장문 대화 메모리 평가 프레임워크',
     },
     faq: faqCopyByLocale.ko,
     apiPage: apiPageByLocale.ko,
+    releaseNotesPage: releaseNotesPageCopyByLocale.ko,
     securityPage: {
       meta: {
         title: 'Security & Privacy | mem9',
         description:
           'mem9의 데이터 처리, 암호화, 접근 제어, 운영 경계에 대한 접근 방식을 소개합니다.',
       },
-      kicker: 'Security',
-      title: 'Security & Privacy',
+      kicker: '보안',
+      title: '보안 및 개인정보 보호',
       intro:
         'mem9는 지속형 클라우드 메모리의 이점을 제공하면서도 명확한 운영 경계와 강한 보안 기반을 유지하도록 설계되었습니다.',
       bridgeBody:
-        'Memory is often the first state problem in an agent system. When your workflow expands into files, artifacts, and retrieval, drive9 becomes the next layer.',
-      bridgeCtaLabel: 'Explore drive9 \u2192',
+        '메모리는 에이전트 시스템에서 가장 먼저 마주하는 상태 문제입니다. 워크플로가 파일, 아티팩트, 검색까지 확장되면 drive9이 다음 레이어가 됩니다.',
+      bridgeCtaLabel: 'drive9 살펴보기 \u2192',
       dataTitle: 'mem9의 데이터 처리 방식',
       dataBody:
         'mem9는 에이전트가 세션, 장치, 워크플로 전반에서 유용한 컨텍스트를 유지할 수 있도록 메모리 데이터를 저장합니다. 데이터 흐름은 이 역할에 맞춰 제한되며, 저장, 검색, 제공이라는 기능 주변에 명확한 데이터 처리 경계를 둡니다.',
@@ -3707,42 +8019,56 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       kicker: '요금',
       title: '간단하고 투명한 요금제',
       description: '무료로 시작하고, 필요할 때 확장하세요.',
+      docsLinkLabel: 'Console 문서에서 요금 상세 보기',
+      featureLabels: [
+        '최종 사용자',
+        '추가 요청',
+        '검색 요청',
+        '지원',
+      ],
       tiers: [
         {
           name: 'Free',
           price: '$0',
           period: '',
           features: [
-            '10,000 메모리',
-            '1,000 검색 API 호출 / 월',
-            '커뮤니티 지원',
+            '무제한',
+            '13,000 / 월',
+            '1,300 / 월',
+            '커뮤니티',
           ],
           ctaLabel: '시작하기',
-          ctaAction: 'alert',
+          ctaAction: 'signin',
         },
         {
           name: 'Starter',
           price: '$9',
           period: ' / 월',
           features: [
-            '50,000 메모리',
-            '5,000 검색 API 호출 / 월',
-            '이메일 지원',
+            '무제한',
+            '65,000 / 월',
+            '6,500 / 월',
+            '이메일',
           ],
-          ctaLabel: '구매하기',
-          ctaAction: 'alert',
+          ctaLabel: '구독하기',
+          ctaAction: 'plan',
+          planSku: 'starter',
+          interval: 'month',
         },
         {
           name: 'Pro',
           price: '$120',
           period: ' / 월',
           features: [
-            '무제한 메모리',
-            '50,000 검색 API 호출 / 월',
-            '우선 지원',
+            '무제한',
+            '650,000 / 월',
+            '65,000 / 월',
+            '우선',
           ],
-          ctaLabel: '구매하기',
-          ctaAction: 'alert',
+          ctaLabel: '구독하기',
+          ctaAction: 'plan',
+          planSku: 'pro',
+          interval: 'month',
           highlighted: true,
         },
         {
@@ -3750,15 +8076,15 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
           price: '맞춤형',
           period: '',
           features: [
-            '무제한 메모리',
-            '무제한 API 호출',
+            '무제한',
+            '무제한',
+            '무제한',
             '전담 지원 & 맞춤 SLA',
           ],
           ctaLabel: '문의하기',
           ctaAction: 'mailto',
         },
       ],
-      alertMessage: '곧 출시됩니다! 현재 완전 무료입니다. 유료 요금제에 도달하더라도 충분한 크레딧을 드리니 안심하고 사용하세요!',
       contactMessage:
         '엔터프라이즈 요금, 보안 검토, 전담 지원이 필요하면 이메일로 문의해 주세요.',
       contactCopyLabel: '이메일 복사',
@@ -3774,10 +8100,12 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       contributing: '기여하기',
       security: '보안',
       contact: '문의하기',
+      poweredByLabel: 'TiDB Cloud 기반',
       copyright: 'mem9.ai. AI 에이전트를 위한 무제한 메모리 인프라.',
     },
     aria: {
       home: 'mem9 홈',
+      mainMenu: '메인 메뉴 열기',
       changeLanguage: '언어 변경',
       changeTheme: '테마 변경',
       themeModeLight: '테마 모드: 라이트',
@@ -3794,13 +8122,18 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: '온보딩 안내를 복사했습니다.',
       copyFailed: '복사에 실패했습니다. 직접 복사해 주세요.',
     },
+    pageTools: {
+      copyMarkdown: 'Markdown으로 복사',
+      copiedMarkdown: 'Markdown을 복사했습니다',
+      copyMarkdownFailed: '복사에 실패했습니다. 다시 시도해 주세요.',
+    },
     localeNames,
   },
   id: {
     meta: {
       title: 'mem9 - Infrastruktur memori tanpa batas untuk OpenClaw',
       description:
-        'mem9.ai adalah infrastruktur memori tanpa batas untuk OpenClaw. Menyediakan recall persisten, pencarian hybrid, dan konteks multi-agent untuk Claude Code, OpenCode, OpenClaw, dan tool kustom.',
+        'mem9.ai adalah infrastruktur memori tanpa batas untuk OpenClaw. Menyediakan recall persisten, pencarian hybrid, dan konteks multi-agent untuk Dify, Claude Code, OpenCode, OpenClaw, dan tool kustom.',
     },
     nav: {
       home: 'Beranda',
@@ -3809,31 +8142,44 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       benchmark: 'Benchmark',
       openclaw: 'OpenClaw',
       yourMemory: 'Memori Anda',
+      yourMemoryDescription: 'Manajemen memori visual',
+      webConsole: 'Web Console',
+      webConsoleDescription: 'Kelola space, rantai space, penggunaan, dan pesanan Anda.',
+      login: 'Masuk',
       billing: 'Harga',
       security: 'Keamanan',
       faq: 'FAQ',
       github: 'GitHub',
+      xcom: 'X.com',
       docs: 'Dokumentasi',
+      mem9Docs: 'Dokumentasi mem9',
+      consoleDocs: 'Dokumentasi mem9 Console',
       api: 'API',
+      apiReferences: 'Referensi API',
+      howItWork: 'How it work',
+      releaseNotes: 'Catatan Rilis',
       contact: 'Hubungi Kami',
     },
     hero: {
       eyebrow: 'MEM9.AI',
       titleLead: 'Memori tanpa batas',
-      titleAccent: 'for OpenClaw',
+      titleAccent: 'untuk AI agents',
       subtitle:
-        'Agent Anda melupakan semuanya di antara sesi. mem9 memperbaikinya. Infrastruktur memori persisten dengan pencarian hybrid, ruang bersama, dan recall lintas agent dari penulisan pertama hingga seterusnya.',
-      poweredByLabel: 'Powered by TiDB Cloud',
-      onboardingLabel: 'Cara install',
-      onboardingHint: 'Salin perintah di atas ke OpenClaw untuk memulai. API key akan dibuat otomatis \u2014 tanpa perlu mendaftar.',
+        'Agent Anda melupakan semuanya di antara sesi. mem9 memberi agent yang Anda gunakan satu lapis memori bersama dengan recall hybrid dan dashboard visual.',
+      guideSelector: {
+        label: 'Bekerja dengan stack agent Anda',
+        items: guideSelectorItems,
+      },
+      onboardingLabel: 'Instal untuk OpenClaw',
+      onboardingBadge: 'Tempel di OpenClaw',
+      onboardingHint:
+        'OpenClaw akan otomatis menginstal mem9 dan menyediakan <strong>API Key</strong> untuk Anda.',
       onboardingStableLabel: 'Stable',
       onboardingBetaLabel: 'Beta',
       onboardingCommandStable:
         'Baca https://mem9.ai/SKILL.md lalu ikuti petunjuk untuk menginstal dan mengonfigurasi mem9 untuk OpenClaw',
       onboardingCommandBeta:
         'Baca https://mem9.ai/beta/SKILL.md lalu ikuti petunjuk untuk menginstal dan mengonfigurasi mem9 untuk OpenClaw',
-      substrateCtaLabel:
-        'Need the backend substrate behind memory? Explore via TiDB Cloud Zero \u2192',
       betaFeature: {
         title: 'Dukungan Context Engine',
         description:
@@ -3858,7 +8204,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       ],
     },
     trust: {
-      title: 'Security & Privacy',
+      title: 'Keamanan & Privasi',
       body:
         'mem9 dibangun untuk penggunaan production di atas infrastruktur cloud kelas enterprise, dengan enkripsi saat transit dan saat tersimpan, kontrol akses, auditabilitas, dan batas penanganan data yang jelas.',
       supporting: 'Pelajari lebih lanjut di ringkasan keamanan dan white paper kami.',
@@ -3899,15 +8245,59 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
     },
     platforms: {
       kicker: 'Platform',
-      title: 'Satu lapisan memori. Untuk setiap agent.',
+      title: 'Memori bersama untuk setiap stack agent',
       description:
-        'Agent tidak seharusnya kehilangan konteks saat berpindah tool. mem9 memberi semua agent di stack Anda memori bersama yang persisten, dapat dicari, dan selalu sinkron.',
+        'mem9 memberi runtime agent dan platform workflow Anda memori bersama yang persisten, dapat dicari, dan selalu sinkron.',
       items: [
         {
           name: 'OpenClaw',
-          desc: 'Unlimited memory',
+          desc: 'Plugin memori',
           detail:
-            'Berikan agent OpenClaw Anda memori yang tidak pernah kedaluwarsa. Panggil kembali percakapan lama, gunakan ulang pengetahuan yang sudah dipelajari, dan tetap konsisten dari sesi ke sesi.',
+            'Tempelkan perintah instal di bagian atas halaman ini ke OpenClaw, lalu ia akan menyiapkan semuanya secara otomatis.',
+          guideId: 'openclaw',
+        },
+        {
+          name: 'Hermes Agent',
+          desc: 'Penyedia memori',
+          detail:
+            'Instal plugin Hermes memory provider mandiri, lalu aktifkan di Hermes Agent.',
+          guideId: 'hermes',
+        },
+        {
+          name: 'Claude Code',
+          desc: 'Kait dan kemampuan',
+          detail:
+            'Gunakan paket plugin Claude Code untuk menyimpan dan memanggil kembali memori melalui kait mem9.',
+          guideId: 'claude',
+        },
+        {
+          name: 'OpenCode',
+          desc: 'Plugin SDK',
+          detail:
+            'Muat integrasi mem9 OpenCode dari konfigurasi OpenCode Anda dan gunakan mem9 API yang sama.',
+          guideId: 'opencode',
+        },
+        {
+          name: 'Codex',
+          desc: 'Kait terkelola',
+          detail:
+            'Gunakan plugin Codex untuk memasang kait terkelola dan konfigurasi proyek yang didukung mem9.',
+          guideId: 'codex',
+        },
+        {
+          name: 'DeepSeek Harness',
+          desc: 'DSH/Cordis bundle',
+          detail:
+            'Pasang bundle @mem9/dsh-plugin untuk recall otomatis, smart ingest, dan lima alat memori.',
+          guideId: 'deepseek',
+          badge: 'Beta',
+        },
+        {
+          name: 'Dify',
+          desc: 'Platform agent dan workflow',
+          detail:
+            'Tambahkan tool mem9 ke aplikasi Agent dan Workflow Dify, dengan satu ruang bersama atau API key per node.',
+          guideId: 'dify',
         },
         {
           name: 'Memori Anda',
@@ -3918,45 +8308,47 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
         },
       ],
       ctaLabel: 'Coba Memori Anda',
-      note: 'Juga bekerja dengan klien apa pun yang dapat membaca atau menulis melalui lapisan API mem9.',
+      guideCtaLabel: 'Baca panduan',
+      note:
+        'Client HTTP kustom juga bisa membaca dan menulis melalui layer mem9 API serta berbagi ruang memori yang sama.',
     },
     benchmark: {
       kicker: 'Benchmark',
       title: 'Hasil Benchmark LoCoMo',
-      description: 'Mengevaluasi kualitas memori percakapan panjang meliputi penalaran multi-hop, recall single-hop, penalaran temporal, QA domain terbuka, dan ketahanan adversarial.',
-      model: 'qwen3.5-plus',
+      description: 'Mengevaluasi kualitas memori percakapan panjang meliputi penalaran multi-hop, penalaran temporal, QA domain terbuka, dan recall single-hop.',
+      model: 'qwen3.6-plus',
       modelLabel: 'Model',
-      overallF1: '58.84%',
-      overallLLM: '71.95%',
-      overallER: '53.76%',
+      overallF1: '43.66%',
+      overallLLM: '86.85%',
+      overallER: '81.43%',
       f1Label: 'Skor F1',
       llmLabel: 'Skor LLM',
       erLabel: 'Evidence Recall',
       categoryLabel: 'Kategori',
       categories: [
-        { name: 'Penalaran Multi-hop', f1: '22.60%', llm: '53.90%', er: '25.1%' },
-        { name: 'Recall Single-hop', f1: '58.18%', llm: '76.01%', er: '67.8%' },
-        { name: 'Penalaran Temporal', f1: '13.79%', llm: '44.79%', er: '18.6%' },
-        { name: 'QA Domain Terbuka', f1: '56.57%', llm: '79.55%', er: '60.1%' },
-        { name: 'Adversarial', f1: '96.19%', llm: 'N/A', er: '57.1%' },
+        { name: 'Penalaran Multi-hop', f1: '17.93%', llm: '83.16%', er: '59.8%' },
+        { name: 'Penalaran Temporal', f1: '50.36%', llm: '89.25%', er: '90.7%' },
+        { name: 'QA Domain Terbuka', f1: '26.70%', llm: '64.58%', er: '56.3%' },
+        { name: 'Recall Single-hop', f1: '51.66%', llm: '89.71%', er: '87.9%' },
       ],
-      source: 'LoCoMo Benchmark — Kerangka evaluasi memori percakapan panjang',
+      source: 'LoCoMo Benchmark: Kerangka evaluasi memori percakapan panjang',
     },
     faq: faqCopyByLocale.id,
     apiPage: apiPageByLocale.id,
+    releaseNotesPage: releaseNotesPageCopyByLocale.id,
     securityPage: {
       meta: {
         title: 'Security & Privacy | mem9',
         description:
           'Pelajari bagaimana mem9 menangani data, enkripsi, kontrol akses, dan batas operasional.',
       },
-      kicker: 'Security',
-      title: 'Security & Privacy',
+      kicker: 'Keamanan',
+      title: 'Keamanan & Privasi',
       intro:
         'mem9 dirancang untuk memberi manfaat memori cloud persisten dengan batas operasional yang jelas dan fondasi keamanan yang kuat.',
       bridgeBody:
-        'Memory is often the first state problem in an agent system. When your workflow expands into files, artifacts, and retrieval, drive9 becomes the next layer.',
-      bridgeCtaLabel: 'Explore drive9 \u2192',
+        'Memori sering kali menjadi masalah state pertama di sistem agent. Ketika alur kerja Anda meluas ke file, artefak, dan retrieval, drive9 menjadi lapisan berikutnya.',
+      bridgeCtaLabel: 'Jelajahi drive9 \u2192',
       dataTitle: 'Bagaimana mem9 menangani data',
       dataBody:
         'mem9 menyimpan data memori untuk membantu agent mempertahankan konteks yang berguna di berbagai sesi, perangkat, dan alur kerja. Aliran data dibatasi pada fungsi utamanya: menyimpan, mengambil, dan menyajikan memori dengan batas penanganan data yang jelas untuk akses dan operasi.',
@@ -3997,42 +8389,56 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       kicker: 'Harga',
       title: 'Harga yang sederhana dan transparan',
       description: 'Mulai gratis. Skalakan saat dibutuhkan.',
+      docsLinkLabel: 'Baca detail harga di dokumentasi Console',
+      featureLabels: [
+        'Pengguna akhir',
+        'Permintaan add',
+        'Permintaan retrieval',
+        'Dukungan',
+      ],
       tiers: [
         {
           name: 'Free',
           price: '$0',
           period: '',
           features: [
-            '10.000 memori',
-            '1.000 panggilan retrieval API / bulan',
-            'Dukungan komunitas',
+            'Tanpa batas',
+            '13.000 / bulan',
+            '1.300 / bulan',
+            'Komunitas',
           ],
           ctaLabel: 'Mulai',
-          ctaAction: 'alert',
+          ctaAction: 'signin',
         },
         {
           name: 'Starter',
           price: '$9',
           period: ' / bln',
           features: [
-            '50.000 memori',
-            '5.000 panggilan retrieval API / bulan',
-            'Dukungan email',
+            'Tanpa batas',
+            '65.000 / bulan',
+            '6.500 / bulan',
+            'Email',
           ],
-          ctaLabel: 'Beli Sekarang',
-          ctaAction: 'alert',
+          ctaLabel: 'Berlangganan',
+          ctaAction: 'plan',
+          planSku: 'starter',
+          interval: 'month',
         },
         {
           name: 'Pro',
           price: '$120',
           period: ' / bln',
           features: [
-            'Memori tanpa batas',
-            '50.000 panggilan retrieval API / bulan',
-            'Dukungan prioritas',
+            'Tanpa batas',
+            '650.000 / bulan',
+            '65.000 / bulan',
+            'Prioritas',
           ],
-          ctaLabel: 'Beli Sekarang',
-          ctaAction: 'alert',
+          ctaLabel: 'Berlangganan',
+          ctaAction: 'plan',
+          planSku: 'pro',
+          interval: 'month',
           highlighted: true,
         },
         {
@@ -4040,15 +8446,15 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
           price: 'Kustom',
           period: '',
           features: [
-            'Memori tanpa batas',
-            'Panggilan API tanpa batas',
+            'Tanpa batas',
+            'Tanpa batas',
+            'Tanpa batas',
             'Dukungan khusus & SLA kustom',
           ],
           ctaLabel: 'Hubungi Kami',
           ctaAction: 'mailto',
         },
       ],
-      alertMessage: 'Nantikan! Saat ini sepenuhnya gratis. Jika Anda mencapai tier berbayar, kami akan memberikan kredit yang cukup. Silakan gunakan dengan tenang!',
       contactMessage:
         'Untuk harga enterprise, review keamanan, dan dukungan khusus, hubungi kami lewat email.',
       contactCopyLabel: 'Salin Email',
@@ -4064,10 +8470,12 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       contributing: 'Berkontribusi',
       security: 'Keamanan',
       contact: 'Hubungi Kami',
+      poweredByLabel: 'Didukung TiDB Cloud',
       copyright: 'mem9.ai. Infrastruktur memori tanpa batas untuk AI agents.',
     },
     aria: {
       home: 'beranda mem9',
+      mainMenu: 'Buka menu utama',
       changeLanguage: 'Ganti bahasa',
       changeTheme: 'Ganti tema',
       themeModeLight: 'Mode tema: Terang',
@@ -4084,13 +8492,18 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       copied: 'Instruksi onboarding disalin.',
       copyFailed: 'Gagal menyalin. Silakan salin manual.',
     },
+    pageTools: {
+      copyMarkdown: 'Salin sebagai Markdown',
+      copiedMarkdown: 'Markdown disalin',
+      copyMarkdownFailed: 'Gagal menyalin. Silakan coba lagi.',
+    },
     localeNames,
   },
   th: {
     meta: {
       title: 'mem9 - โครงสร้างพื้นฐานหน่วยความจำไม่จำกัดสำหรับ OpenClaw',
       description:
-        'mem9.ai คือโครงสร้างพื้นฐานหน่วยความจำไม่จำกัดสำหรับ OpenClaw พร้อมการเรียกคืนแบบถาวร การค้นหาแบบ hybrid และบริบทแบบ multi-agent สำหรับ Claude Code, OpenCode, OpenClaw และเครื่องมือแบบกำหนดเอง',
+        'mem9.ai คือโครงสร้างพื้นฐานหน่วยความจำไม่จำกัดสำหรับ OpenClaw พร้อมการเรียกคืนแบบถาวร การค้นหาแบบ hybrid และบริบทแบบ multi-agent สำหรับ Dify, Claude Code, OpenCode, OpenClaw และเครื่องมือแบบกำหนดเอง',
     },
     nav: {
       home: 'หน้าแรก',
@@ -4099,31 +8512,44 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       benchmark: 'เบนช์มาร์ก',
       openclaw: 'OpenClaw',
       yourMemory: 'ความทรงจำของคุณ',
+      yourMemoryDescription: 'การจัดการหน่วยความจำแบบภาพ',
+      webConsole: 'Web Console',
+      webConsoleDescription: 'จัดการพื้นที่ เชนพื้นที่ การใช้งาน และคำสั่งซื้อของคุณ',
+      login: 'ล็อกอิน',
       billing: 'ราคา',
       security: 'ความปลอดภัย',
       faq: 'คำถามที่พบบ่อย',
       github: 'GitHub',
+      xcom: 'X.com',
       docs: 'เอกสาร',
+      mem9Docs: 'เอกสาร mem9',
+      consoleDocs: 'เอกสาร mem9 Console',
       api: 'API',
+      apiReferences: 'เอกสารอ้างอิง API',
+      howItWork: 'How it work',
+      releaseNotes: 'บันทึกการเผยแพร่',
       contact: 'ติดต่อเรา',
     },
     hero: {
       eyebrow: 'MEM9.AI',
       titleLead: 'หน่วยความจำไม่จำกัด',
-      titleAccent: 'for OpenClaw',
+      titleAccent: 'สำหรับ AI agents',
       subtitle:
-        'เอเจนต์ของคุณลืมทุกอย่างระหว่างแต่ละเซสชัน mem9 เข้ามาแก้ปัญหานี้ด้วยโครงสร้างพื้นฐานหน่วยความจำแบบถาวรที่มีการค้นหาแบบ hybrid พื้นที่ร่วมกัน และการเรียกคืนข้ามเอเจนต์ตั้งแต่การเขียนครั้งแรกไปจนตลอดการใช้งาน',
-      poweredByLabel: 'Powered by TiDB Cloud',
-      onboardingLabel: 'วิธีติดตั้ง',
-      onboardingHint: 'คัดลอกคำสั่งด้านบนไปวางใน OpenClaw เพื่อเริ่มต้น API key จะถูกสร้างให้อัตโนมัติ \u2014 ไม่ต้องสมัครสมาชิก',
+        'เอเจนต์ของคุณลืมทุกอย่างระหว่างแต่ละเซสชัน mem9 มอบเลเยอร์หน่วยความจำที่แชร์ร่วมกันให้กับเอเจนต์ที่คุณใช้งาน พร้อมการค้นคืนแบบ hybrid และแดชบอร์ดแบบภาพ',
+      guideSelector: {
+        label: 'ใช้งานได้กับสแตกเอเจนต์ของคุณ',
+        items: guideSelectorItems,
+      },
+      onboardingLabel: 'ติดตั้งสำหรับ OpenClaw',
+      onboardingBadge: 'วางใน OpenClaw',
+      onboardingHint:
+        'OpenClaw จะติดตั้ง mem9 และออก <strong>API Key</strong> ให้คุณโดยอัตโนมัติ',
       onboardingStableLabel: 'Stable',
       onboardingBetaLabel: 'Beta',
       onboardingCommandStable:
         'อ่าน https://mem9.ai/SKILL.md แล้วทำตามขั้นตอนเพื่อติดตั้งและตั้งค่า mem9 สำหรับ OpenClaw',
       onboardingCommandBeta:
         'อ่าน https://mem9.ai/beta/SKILL.md แล้วทำตามขั้นตอนเพื่อติดตั้งและตั้งค่า mem9 สำหรับ OpenClaw',
-      substrateCtaLabel:
-        'Need the backend substrate behind memory? Explore via TiDB Cloud Zero \u2192',
       betaFeature: {
         title: 'รองรับ Context Engine',
         description:
@@ -4148,7 +8574,7 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       ],
     },
     trust: {
-      title: 'Security & Privacy',
+      title: 'ความปลอดภัยและความเป็นส่วนตัว',
       body:
         'mem9 ถูกสร้างมาสำหรับการใช้งานระดับ production บนโครงสร้างพื้นฐานคลาวด์ระดับ enterprise พร้อมการเข้ารหัสระหว่างส่งและขณะจัดเก็บ การควบคุมสิทธิ์ การตรวจสอบย้อนหลังได้ และขอบเขตการจัดการข้อมูลที่ชัดเจน',
       supporting: 'ดูรายละเอียดเพิ่มเติมได้ในภาพรวมด้านความปลอดภัยและ white paper ของเรา',
@@ -4189,15 +8615,59 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
     },
     platforms: {
       kicker: 'แพลตฟอร์ม',
-      title: 'เมมโมรีเลเยอร์เดียว สำหรับทุกเอเจนต์',
+      title: 'หน่วยความจำร่วมสำหรับทุกสแตกเอเจนต์',
       description:
-        'เอเจนต์ไม่ควรสูญเสียบริบทเมื่อสลับเครื่องมือ mem9 ทำให้ทุกเอเจนต์ในสแตกของคุณมีหน่วยความจำร่วมกันแบบถาวร ค้นหาได้ และซิงก์กันเสมอ',
+        'mem9 ทำให้ runtime ของเอเจนต์และแพลตฟอร์มเวิร์กโฟลว์ของคุณมีหน่วยความจำร่วมกันแบบถาวร ค้นหาได้ และซิงก์กันเสมอ',
       items: [
         {
           name: 'OpenClaw',
-          desc: 'Unlimited memory',
+          desc: 'ปลั๊กอินหน่วยความจำ',
           detail:
-            'มอบหน่วยความจำที่ไม่มีวันหมดอายุให้กับเอเจนต์ OpenClaw ของคุณ เรียกดูบทสนทนาเก่า ใช้ความรู้ที่เคยเรียนรู้ซ้ำ และคงความสม่ำเสมอได้ในทุกเซสชัน',
+            'วางคำสั่งติดตั้งจากด้านบนของหน้านี้ลงใน OpenClaw แล้วระบบจะตั้งค่าให้อัตโนมัติ',
+          guideId: 'openclaw',
+        },
+        {
+          name: 'Hermes Agent',
+          desc: 'ผู้ให้บริการหน่วยความจำ',
+          detail:
+            'ติดตั้งปลั๊กอิน Hermes memory provider แบบ standalone แล้วเปิดใช้งานใน Hermes Agent',
+          guideId: 'hermes',
+        },
+        {
+          name: 'Claude Code',
+          desc: 'ฮุกและทักษะ',
+          detail:
+            'ใช้แพ็กเกจปลั๊กอิน Claude Code เพื่อบันทึกและเรียกคืนหน่วยความจำผ่านฮุกของ mem9',
+          guideId: 'claude',
+        },
+        {
+          name: 'OpenCode',
+          desc: 'Plugin SDK',
+          detail:
+            'โหลดการเชื่อมต่อ mem9 OpenCode จาก config ของ OpenCode แล้วใช้ mem9 API ชุดเดียวกัน',
+          guideId: 'opencode',
+        },
+        {
+          name: 'Codex',
+          desc: 'ฮุกแบบจัดการ',
+          detail:
+            'ใช้ปลั๊กอิน Codex เพื่อติดตั้งฮุกแบบจัดการและการตั้งค่าระดับโปรเจกต์ที่ใช้ mem9 เป็นฐาน',
+          guideId: 'codex',
+        },
+        {
+          name: 'DeepSeek Harness',
+          desc: 'DSH/Cordis bundle',
+          detail:
+            'ติดตั้งบันเดิล @mem9/dsh-plugin เพื่อการเรียกคืนอัตโนมัติ การบันทึกอัจฉริยะ และเครื่องมือหน่วยความจำห้ารายการ',
+          guideId: 'deepseek',
+          badge: 'Beta',
+        },
+        {
+          name: 'Dify',
+          desc: 'แพลตฟอร์มเอเจนต์และเวิร์กโฟลว์',
+          detail:
+            'เพิ่มเครื่องมือ mem9 ให้แอป Agent และ Workflow ของ Dify พร้อมใช้พื้นที่ร่วมกันหรือ API key แยกตามโหนด',
+          guideId: 'dify',
         },
         {
           name: 'ความทรงจำของคุณ',
@@ -4208,45 +8678,47 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
         },
       ],
       ctaLabel: 'ลองใช้ความทรงจำของคุณ',
-      note: 'ยังทำงานได้กับไคลเอนต์ใดก็ตามที่อ่านหรือเขียนผ่านชั้น API ของ mem9 ได้',
+      guideCtaLabel: 'อ่านคู่มือ',
+      note:
+        'HTTP client แบบกำหนดเองก็อ่านและเขียนผ่านเลเยอร์ mem9 API ได้ และแชร์พื้นที่หน่วยความจำเดียวกัน',
     },
     benchmark: {
       kicker: 'เบนช์มาร์ก',
       title: 'ผลลัพธ์เบนช์มาร์ก LoCoMo',
-      description: 'ประเมินคุณภาพหน่วยความจำการสนทนายาวครอบคลุมการอนุมานหลายขั้น การเรียกคืนขั้นเดียว การอนุมานเชิงเวลา QA โดเมนเปิด และความทนทานต่อการโจมตี',
-      model: 'qwen3.5-plus',
+      description: 'ประเมินคุณภาพหน่วยความจำการสนทนายาวครอบคลุมการอนุมานหลายขั้น การอนุมานเชิงเวลา QA โดเมนเปิด และการเรียกคืนขั้นเดียว',
+      model: 'qwen3.6-plus',
       modelLabel: 'โมเดล',
-      overallF1: '58.84%',
-      overallLLM: '71.95%',
-      overallER: '53.76%',
+      overallF1: '43.66%',
+      overallLLM: '86.85%',
+      overallER: '81.43%',
       f1Label: 'คะแนน F1',
       llmLabel: 'คะแนน LLM',
       erLabel: 'Evidence Recall',
       categoryLabel: 'หมวดหมู่',
       categories: [
-        { name: 'การอนุมานหลายขั้น', f1: '22.60%', llm: '53.90%', er: '25.1%' },
-        { name: 'การเรียกคืนขั้นเดียว', f1: '58.18%', llm: '76.01%', er: '67.8%' },
-        { name: 'การอนุมานเชิงเวลา', f1: '13.79%', llm: '44.79%', er: '18.6%' },
-        { name: 'QA โดเมนเปิด', f1: '56.57%', llm: '79.55%', er: '60.1%' },
-        { name: 'การทดสอบเชิงรุก', f1: '96.19%', llm: 'N/A', er: '57.1%' },
+        { name: 'การอนุมานหลายขั้น', f1: '17.93%', llm: '83.16%', er: '59.8%' },
+        { name: 'การอนุมานเชิงเวลา', f1: '50.36%', llm: '89.25%', er: '90.7%' },
+        { name: 'QA โดเมนเปิด', f1: '26.70%', llm: '64.58%', er: '56.3%' },
+        { name: 'การเรียกคืนขั้นเดียว', f1: '51.66%', llm: '89.71%', er: '87.9%' },
       ],
-      source: 'LoCoMo Benchmark — เฟรมเวิร์กประเมินหน่วยความจำการสนทนายาว',
+      source: 'LoCoMo Benchmark: เฟรมเวิร์กประเมินหน่วยความจำการสนทนายาว',
     },
     faq: faqCopyByLocale.th,
     apiPage: apiPageByLocale.th,
+    releaseNotesPage: releaseNotesPageCopyByLocale.th,
     securityPage: {
       meta: {
         title: 'Security & Privacy | mem9',
         description:
           'ดูว่า mem9 จัดการข้อมูล การเข้ารหัส การควบคุมสิทธิ์ และขอบเขตการปฏิบัติงานอย่างไร',
       },
-      kicker: 'Security',
-      title: 'Security & Privacy',
+      kicker: 'ความปลอดภัย',
+      title: 'ความปลอดภัยและความเป็นส่วนตัว',
       intro:
         'mem9 ถูกออกแบบมาเพื่อให้ได้ประโยชน์จาก cloud memory แบบถาวร พร้อมขอบเขตการปฏิบัติงานที่ชัดเจนและรากฐานด้านความปลอดภัยที่แข็งแรง',
       bridgeBody:
-        'Memory is often the first state problem in an agent system. When your workflow expands into files, artifacts, and retrieval, drive9 becomes the next layer.',
-      bridgeCtaLabel: 'Explore drive9 \u2192',
+        'หน่วยความจำมักเป็นปัญหา state แรกของระบบเอเจนต์ เมื่อเวิร์กโฟลว์ของคุณขยายไปที่ไฟล์ อาร์ติแฟกต์ และการค้นคืน drive9 จะกลายเป็นเลเยอร์ถัดไป',
+      bridgeCtaLabel: 'สำรวจ drive9 \u2192',
       dataTitle: 'mem9 จัดการข้อมูลอย่างไร',
       dataBody:
         'mem9 จัดเก็บข้อมูลหน่วยความจำเพื่อช่วยให้เอเจนต์รักษาบริบทที่มีประโยชน์ไว้ได้ข้ามเซสชัน อุปกรณ์ และเวิร์กโฟลว์ การไหลของข้อมูลถูกจำกัดให้อยู่ในหน้าที่หลักของผลิตภัณฑ์ คือการจัดเก็บ ค้นคืน และให้บริการหน่วยความจำ พร้อมขอบเขตการจัดการข้อมูลที่ชัดเจนสำหรับการเข้าถึงและการปฏิบัติงาน',
@@ -4287,42 +8759,56 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       kicker: 'ราคา',
       title: 'ราคาที่เรียบง่ายและโปร่งใส',
       description: 'เริ่มต้นฟรี ขยายเมื่อคุณต้องการ',
+      docsLinkLabel: 'อ่านรายละเอียดราคาในเอกสาร Console',
+      featureLabels: [
+        'ผู้ใช้ปลายทาง',
+        'Add requests',
+        'Retrieval requests',
+        'การสนับสนุน',
+      ],
       tiers: [
         {
           name: 'Free',
           price: '$0',
           period: '',
           features: [
-            '10,000 หน่วยความจำ',
-            '1,000 retrieval API calls / เดือน',
-            'การสนับสนุนจากชุมชน',
+            'ไม่จำกัด',
+            '13,000 / เดือน',
+            '1,300 / เดือน',
+            'ชุมชน',
           ],
           ctaLabel: 'เริ่มใช้งาน',
-          ctaAction: 'alert',
+          ctaAction: 'signin',
         },
         {
           name: 'Starter',
           price: '$9',
           period: ' / เดือน',
           features: [
-            '50,000 หน่วยความจำ',
-            '5,000 retrieval API calls / เดือน',
-            'สนับสนุนทางอีเมล',
+            'ไม่จำกัด',
+            '65,000 / เดือน',
+            '6,500 / เดือน',
+            'อีเมล',
           ],
-          ctaLabel: 'ซื้อเลย',
-          ctaAction: 'alert',
+          ctaLabel: 'สมัครสมาชิก',
+          ctaAction: 'plan',
+          planSku: 'starter',
+          interval: 'month',
         },
         {
           name: 'Pro',
           price: '$120',
           period: ' / เดือน',
           features: [
-            'หน่วยความจำไม่จำกัด',
-            '50,000 retrieval API calls / เดือน',
-            'สนับสนุนแบบเร่งด่วน',
+            'ไม่จำกัด',
+            '650,000 / เดือน',
+            '65,000 / เดือน',
+            'เร่งด่วน',
           ],
-          ctaLabel: 'ซื้อเลย',
-          ctaAction: 'alert',
+          ctaLabel: 'สมัครสมาชิก',
+          ctaAction: 'plan',
+          planSku: 'pro',
+          interval: 'month',
           highlighted: true,
         },
         {
@@ -4330,15 +8816,15 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
           price: 'กำหนดเอง',
           period: '',
           features: [
-            'หน่วยความจำไม่จำกัด',
-            'API calls ไม่จำกัด',
+            'ไม่จำกัด',
+            'ไม่จำกัด',
+            'ไม่จำกัด',
             'สนับสนุนเฉพาะ & SLA กำหนดเอง',
           ],
           ctaLabel: 'ติดต่อเรา',
           ctaAction: 'mailto',
         },
       ],
-      alertMessage: 'โปรดรอติดตาม! ขณะนี้ใช้งานได้ฟรีทั้งหมด หากคุณถึงแพ็กเกจที่ต้องชำระเงิน เราจะให้เครดิตที่เพียงพอ ใช้งานได้อย่างสบายใจ!',
       contactMessage:
         'หากต้องการสอบถามราคาแบบองค์กร การตรวจสอบความปลอดภัย หรือการสนับสนุนเฉพาะ โปรดติดต่อเราทางอีเมล',
       contactCopyLabel: 'คัดลอกอีเมล',
@@ -4354,10 +8840,12 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
       contributing: 'ร่วมพัฒนา',
       security: 'ความปลอดภัย',
       contact: 'ติดต่อเรา',
+      poweredByLabel: 'ขับเคลื่อนโดย TiDB Cloud',
       copyright: 'mem9.ai โครงสร้างพื้นฐานหน่วยความจำไม่จำกัดสำหรับ AI agents',
     },
     aria: {
       home: 'หน้าแรก mem9',
+      mainMenu: 'เปิดเมนูหลัก',
       changeLanguage: 'เปลี่ยนภาษา',
       changeTheme: 'เปลี่ยนธีม',
       themeModeLight: 'โหมดธีม: สว่าง',
@@ -4373,6 +8861,11 @@ export const siteCopy: Record<SiteLocale, SiteDictionary> = {
     copyFeedback: {
       copied: 'คัดลอกคำแนะนำการตั้งค่าแล้ว',
       copyFailed: 'คัดลอกไม่สำเร็จ กรุณาคัดลอกด้วยตนเอง',
+    },
+    pageTools: {
+      copyMarkdown: 'คัดลอกเป็น Markdown',
+      copiedMarkdown: 'คัดลอก Markdown แล้ว',
+      copyMarkdownFailed: 'คัดลอกไม่สำเร็จ โปรดลองอีกครั้ง',
     },
     localeNames,
   },

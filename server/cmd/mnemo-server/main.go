@@ -19,8 +19,10 @@ import (
 	"github.com/qiffang/mnemos/server/internal/middleware"
 	"github.com/qiffang/mnemos/server/internal/repository"
 	"github.com/qiffang/mnemos/server/internal/reqid"
+	"github.com/qiffang/mnemos/server/internal/runtimeusage"
 	"github.com/qiffang/mnemos/server/internal/service"
 	"github.com/qiffang/mnemos/server/internal/tenant"
+	"github.com/qiffang/mnemos/server/internal/webhook"
 )
 
 func main() {
@@ -95,8 +97,26 @@ func main() {
 	}
 	logger.Info("encryption configured", "type", cfg.EncryptType)
 
+	webhookStore := webhook.NewSQLStore(db, cfg.DBBackend)
+	if err := webhookStore.EnsureSchema(context.Background()); err != nil {
+		logger.Error("failed to initialize webhook tables", "err", err)
+		os.Exit(1)
+	}
+	allowLocalWebhookHTTP := cfg.Env != "prod" && cfg.Env != "production"
+	webhookSvc := webhook.NewService(webhookStore, encryptor, allowLocalWebhookHTTP)
+	webhookWorkerCtx, webhookWorkerCancel := context.WithCancel(context.Background())
+	defer webhookWorkerCancel()
+	go func() {
+		err := webhook.NewDispatcher(webhookStore, webhookSvc, webhook.DispatcherConfig{}, logger).Run(webhookWorkerCtx)
+		if err != nil && err != context.Canceled {
+			logger.Error("webhook dispatcher stopped", "err", err)
+		}
+	}()
+	logger.Info("webhook dispatcher initialized", "allow_local_http", allowLocalWebhookHTTP)
+
 	// Repositories.
 	tenantRepo := repository.NewTenantRepo(cfg.DBBackend, db)
+	spaceChainRepo := repository.NewSpaceChainRepo(cfg.DBBackend, db)
 	var utmRepo repository.UTMRepo
 	if cfg.UTMEnabled {
 		if err := db.QueryRowContext(context.Background(), "SELECT 1 FROM tenant_utm LIMIT 0").Err(); err != nil {
@@ -114,6 +134,7 @@ func main() {
 		IdleTimeout:    cfg.TenantPoolIdleTimeout,
 		TotalLimit:     cfg.TenantPoolTotalLimit,
 		Backend:        cfg.DBBackend,
+		EmbedAutoModel: cfg.EmbedAutoModel,
 	})
 	defer tenantPool.Close()
 
@@ -138,6 +159,51 @@ func main() {
 	}
 	logger.Info("metering writer initialized", "enabled", cfg.MeteringEnabled, "destination", redactMeteringURLForLog(cfg.MeteringURL))
 
+	var runtimeUsageMetering metering.Writer
+	var runtimeUsageStore *runtimeusage.SQLStore
+	if cfg.RuntimeUsageEnabled {
+		if cfg.RuntimeUsageOutboxEnabled {
+			runtimeUsageStore = runtimeusage.NewSQLStore(db, cfg.DBBackend)
+			if err := runtimeUsageStore.EnsureSchema(context.Background()); err != nil {
+				logger.Error("failed to initialize runtime usage outbox", "err", err)
+				os.Exit(1)
+			}
+		}
+		runtimeUsageMetering, err = metering.NewConsoleRuntime(metering.ConsoleRuntimeConfig{
+			BaseURL:        cfg.RuntimeUsageBaseURL,
+			InternalSecret: cfg.RuntimeUsageInternalSecret,
+			Timeout:        cfg.RuntimeUsageMeteringTimeout,
+			Store:          runtimeUsageStore,
+		}, logger)
+		if err != nil {
+			logger.Error("failed to initialize runtime usage metering writer", "err", err)
+			os.Exit(1)
+		}
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := runtimeUsageMetering.Close(ctx); err != nil {
+				logger.Error("runtime usage metering close error", "err", err)
+			}
+		}()
+		logger.Info("runtime usage metering writer initialized", "enabled", true)
+	}
+	runtimeUsageClient := runtimeusage.NewHTTPClient(cfg.RuntimeUsageBaseURL, cfg.RuntimeUsageInternalSecret, cfg.RuntimeUsageTimeout)
+	runtimeUsageManager := runtimeusage.NewManager(newRuntimeUsageConfig(cfg, runtimeUsageStore), runtimeUsageClient, runtimeUsageMetering, logger)
+	var runtimeUsageWorkerCancel context.CancelFunc
+	if cfg.RuntimeUsageEnabled && runtimeUsageStore != nil {
+		var runtimeUsageWorkerCtx context.Context
+		runtimeUsageWorkerCtx, runtimeUsageWorkerCancel = context.WithCancel(context.Background())
+		defer runtimeUsageWorkerCancel()
+		go func() {
+			err := runtimeusage.NewWorker(runtimeUsageStore, runtimeUsageClient, runtimeUsageMetering, logger).Run(runtimeUsageWorkerCtx)
+			if err != nil && err != context.Canceled {
+				logger.Error("runtime usage outbox worker stopped", "err", err)
+			}
+		}()
+	}
+	logger.Info("runtime usage initialized", "enabled", cfg.RuntimeUsageEnabled)
+
 	// Services.
 	// Select provisioner based on configuration
 	var provisioner tenant.Provisioner
@@ -152,8 +218,22 @@ func main() {
 	// Check for TiDB Cloud credentials (only if Zero is not enabled)
 	if provisioner == nil && cfg.DBBackend == "tidb" {
 		if os.Getenv("MNEMO_TIDBCLOUD_API_KEY") != "" && os.Getenv("MNEMO_TIDBCLOUD_API_SECRET") != "" {
-			provisioner = tenant.NewTiDBCloudProvisioner(cfg.TiDBCloudAPIURL, cfg.TiDBCloudPoolID)
-			logger.Info("using TiDB Cloud Pool provisioner")
+			provisioner = tenant.NewTiDBCloudProvisionerWithPrivateLink(
+				cfg.TiDBCloudAPIURL,
+				cfg.TiDBCloudPoolID,
+				cfg.EmbedAutoModel,
+				cfg.EmbedAutoDims,
+				cfg.EmbedDims,
+				cfg.FTSEnabled,
+				tenant.TiDBCloudPrivateLinkConfig{
+					Prefer:       cfg.TiDBCloudPreferPrivateLink,
+					ServiceNames: cfg.TiDBCloudPrivateLinkServiceNames,
+				},
+			)
+			logger.Info("using TiDB Cloud Pool provisioner",
+				"prefer_privatelink", cfg.TiDBCloudPreferPrivateLink,
+				"privatelink_service_names", len(cfg.TiDBCloudPrivateLinkServiceNames),
+			)
 		}
 	}
 
@@ -162,21 +242,53 @@ func main() {
 		logger.Info("no provisioner configured (pre-existing tenants mode)")
 	}
 
+	var spendLimitAdjuster tenant.SpendLimitAdjuster
+	var spendLimitCooldown *middleware.SpendLimitCooldown
+	var autoSpendLimitCfg middleware.AutoSpendLimitConfig
+	if cfg.AutoSpendLimitEnabled {
+		if os.Getenv("MNEMO_TIDBCLOUD_API_KEY") != "" && os.Getenv("MNEMO_TIDBCLOUD_API_SECRET") != "" {
+			spendLimitAdjuster = tenant.NewTiDBCloudProvisioner(cfg.TiDBCloudAPIURL, cfg.TiDBCloudPoolID, cfg.EmbedAutoModel, cfg.EmbedAutoDims, cfg.EmbedDims, cfg.FTSEnabled)
+			spendLimitCooldown = middleware.NewSpendLimitCooldown(cfg.AutoSpendLimitCooldown)
+			autoSpendLimitCfg = middleware.AutoSpendLimitConfig{Enabled: true, Increment: cfg.AutoSpendLimitIncrement, Max: cfg.AutoSpendLimitMax}
+			logger.Info("auto spend limit enabled", "increment", cfg.AutoSpendLimitIncrement, "max", cfg.AutoSpendLimitMax, "cooldown", cfg.AutoSpendLimitCooldown.String())
+		} else {
+			logger.Warn("auto spend limit enabled but TiDB Cloud credentials missing; disabled")
+		}
+	}
+
 	tenantSvc := service.NewTenantService(tenantRepo, provisioner, tenantPool, logger, cfg.EmbedAutoModel, cfg.EmbedAutoDims, cfg.EmbedDims, cfg.FTSEnabled, encryptor)
 	if utmRepo != nil {
 		tenantSvc.WithUTMRepo(utmRepo)
 	}
+	spaceChainSvc := service.NewSpaceChainService(spaceChainRepo)
 
 	// Middleware.
-	tenantMW := middleware.ResolveTenant(tenantRepo, tenantPool, encryptor, cfg.ClusterBlacklist)
-	apiKeyMW := middleware.ResolveApiKey(tenantRepo, tenantPool, encryptor, cfg.ClusterBlacklist)
-	rl := middleware.NewRateLimiter(cfg.RateLimit, cfg.RateBurst)
+	var tenantMW func(http.Handler) http.Handler
+	var apiKeyMW func(http.Handler) http.Handler
+	if spendLimitAdjuster != nil {
+		tenantMW = middleware.ResolveTenant(tenantRepo, tenantPool, encryptor, cfg.ClusterBlacklist, middleware.WithSpendLimitAdjuster(spendLimitAdjuster, spendLimitCooldown, autoSpendLimitCfg))
+		apiKeyMW = middleware.ResolveApiKey(tenantRepo, tenantPool, encryptor, cfg.ClusterBlacklist, middleware.WithSpendLimitAdjuster(spendLimitAdjuster, spendLimitCooldown, autoSpendLimitCfg), middleware.WithSpaceChainRepo(spaceChainRepo))
+	} else {
+		tenantMW = middleware.ResolveTenant(tenantRepo, tenantPool, encryptor, cfg.ClusterBlacklist)
+		apiKeyMW = middleware.ResolveApiKey(tenantRepo, tenantPool, encryptor, cfg.ClusterBlacklist, middleware.WithSpaceChainRepo(spaceChainRepo))
+	}
+	rl := middleware.NewRateLimiter(cfg.RateLimit, cfg.RateBurst, cfg.RuntimeUsageInternalSecret)
 	defer rl.Stop()
 	rateMW := rl.Middleware()
 
+	activityTracker := service.NewActivityTracker(tenantRepo, logger)
+
 	// Handler.
-	srv := handler.NewServer(tenantSvc, uploadTaskRepo, cfg.UploadDir, embedder, llmClient, cfg.EmbedAutoModel, cfg.FTSEnabled, service.IngestMode(cfg.IngestMode), cfg.DBBackend, logger)
-	router := srv.Router(tenantMW, rateMW, apiKeyMW)
+	srv := handler.NewServer(tenantSvc, uploadTaskRepo, cfg.UploadDir, embedder, llmClient, cfg.EmbedAutoModel, cfg.FTSEnabled, service.IngestMode(cfg.IngestMode), cfg.DBBackend, logger).
+		WithSpaceChainService(spaceChainSvc, cfg.ChainRecallStopScore).
+		WithMetering(meteringWriter).
+		WithRuntimeUsage(runtimeUsageManager).
+		WithWebhookService(webhookSvc).
+		WithActivityTracker(activityTracker).
+		WithDisableSessionSave(cfg.DisableSessionSave).
+		WithAssistantFactExtraction(cfg.FactExtractionIncludeAssistant).
+		WithRecallRequestBudget(cfg.RecallRequestTimeout, cfg.RecallResponseReserve)
+	router := srv.Router(tenantMW, rateMW, apiKeyMW, middleware.CORS(cfg.CORSAllowedOrigins))
 
 	httpSrv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -196,11 +308,15 @@ func main() {
 		embedder,
 		llmClient,
 		cfg.EmbedAutoModel,
+		cfg.EmbedAutoDims,
+		cfg.EmbedDims,
 		cfg.FTSEnabled,
 		service.IngestMode(cfg.IngestMode),
 		logger,
 		cfg.WorkerConcurrency,
 		encryptor,
+		activityTracker,
+		service.WithAssistantFactExtraction(cfg.FactExtractionIncludeAssistant),
 	)
 	go func() {
 		if err := uploadWorker.Run(workerCtx); err != nil {
@@ -215,6 +331,10 @@ func main() {
 		sig := <-sigCh
 		logger.Info("received signal, shutting down", "signal", sig)
 
+		if runtimeUsageWorkerCancel != nil {
+			runtimeUsageWorkerCancel()
+		}
+		webhookWorkerCancel()
 		workerCancel() // Stop upload worker first.
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -230,6 +350,28 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("server stopped")
+}
+
+func newRuntimeUsageConfig(cfg *config.Config, outbox runtimeusage.OutboxStore) runtimeusage.Config {
+	return runtimeusage.Config{
+		Enabled:                   cfg.RuntimeUsageEnabled,
+		ProviderID:                cfg.RuntimeUsageProviderID,
+		BaseURL:                   cfg.RuntimeUsageBaseURL,
+		InternalSecret:            cfg.RuntimeUsageInternalSecret,
+		Timeout:                   cfg.RuntimeUsageTimeout,
+		MeteringTimeout:           cfg.RuntimeUsageMeteringTimeout,
+		ReservationTTL:            cfg.RuntimeUsageReservationTTL,
+		OperationTTL:              cfg.RuntimeUsageOperationTTL,
+		ReservationRetryBaseDelay: cfg.RuntimeUsageRetryBaseDelay,
+		ReservationRetryMaxDelay:  cfg.RuntimeUsageRetryMaxDelay,
+		FailOpen:                  cfg.RuntimeUsageFailOpen,
+		OutboxEnabled:             cfg.RuntimeUsageOutboxEnabled,
+		NoticeTimeout:             cfg.RuntimeUsageNoticeTimeout,
+		NoticeCacheEnabled:        cfg.RuntimeUsageNoticeCacheEnabled,
+		NoticeCacheTTL:            cfg.RuntimeUsageNoticeCacheTTL,
+		NoticeStaleTTL:            cfg.RuntimeUsageNoticeStaleTTL,
+		Outbox:                    outbox,
+	}
 }
 
 func redactMeteringURLForLog(raw string) string {

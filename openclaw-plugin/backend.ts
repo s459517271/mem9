@@ -11,7 +11,7 @@ import type {
 
 export class PendingProvisionError extends Error {
   constructor(
-    message = "mem9 create-new setup is waiting for the first post-restart message to finish provisioning",
+    message = "mem9 create-new setup is waiting for an OpenClaw agent turn that runs before_prompt_build to finish provisioning",
   ) {
     super(message);
     this.name = "PendingProvisionError";
@@ -38,4 +38,5 @@ export interface MemoryBackend {
    * POST /v1alpha{1,2}/mem9s/.../memories (messages body) → LLM extraction + reconciliation.
    */
   ingest(input: IngestInput): Promise<IngestResult>;
+  runtimeState(): Promise<unknown>;
 }

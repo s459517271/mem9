@@ -72,12 +72,20 @@ A memory is a piece of knowledge with optional structure:
   key: "tikv/compaction-tuning",      // optional, for upsert lookup
   tags: ["tikv", "performance"],       // optional, for filtering
   source: "sj-claude-code",           // who wrote it
-  metadata: { severity: "high" },      // optional, arbitrary structured data
+  metadata: { severity: "high" },      // optional JSON; server mode reserves external_provenance
   embedding: [0.012, -0.034, ...],     // auto-generated if embedding provider configured
   version: 3,                          // auto-managed, for conflict detection
   score: 0.87                          // only in hybrid search responses, omitted otherwise
 }
 ```
+
+Metadata remains application-defined JSON in general. In Server Mode, the
+`external_provenance` object member is reserved for creation provenance. The
+server currently accepts only the exact `agent9/message-source@1` envelope on a
+message-ingest request with one fact-eligible user message, persists the
+sanitized envelope on each new fact revision, and prevents generic memory
+updates from replacing or removing it. Requests and existing memories without
+that reserved member retain the legacy metadata behavior.
 
 ### Space (Server Mode only)
 
@@ -122,6 +130,9 @@ and saves new ones — all transparently.
     "entries": {
       "mem9": {
         "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           "apiUrl": "http://localhost:8080",
           "apiKey": "uuid"
@@ -450,7 +461,7 @@ CREATE TABLE IF NOT EXISTS space_tokens (
 |--------|------------|-------------|
 | `space_id` | Fixed value (derived from DB name) | Server-managed, maps to space |
 | `embedding` | Plugin generates (if configured) | Server generates (if configured) |
-| `metadata` | Full JSON support | Full JSON support |
+| `metadata` | Full JSON support | Full JSON support, with reserved creation-only `external_provenance` |
 | `version` | Auto-incremented on write | Atomic `version = version + 1` in SQL |
 
 The `memories` table is **identical** across modes. This makes Direct → Server migration
@@ -558,6 +569,11 @@ the `X-API-Key` header. Legacy `tenantID` config remains supported as an alias
 for the same value; the plugin still uses `/v1alpha2/mem9s/...` rather than
 keeping a separate v1alpha1 codepath.
 
+On OpenClaw 4.23+ / 2026.4.22+, the config also sets the entry-level hook
+policy `plugins.entries.mem9.hooks.allowConversationAccess = true` so
+`agent_end` includes conversation messages for automatic upload. This is an
+OpenClaw plugin-entry permission, not part of `plugins.entries.mem9.config`.
+
 **Why plugin (kind: "memory") instead of skill?**
 
 | | Plugin (`kind: "memory"`) | Skill |
@@ -578,6 +594,9 @@ This is the same philosophy as the Claude Code side: Hooks (automatic) over MCP 
 {
   "mem9": {
     "enabled": true,
+    "hooks": {
+      "allowConversationAccess": true
+    },
     "config": {
       "apiUrl": "http://localhost:8080",
       "apiKey": "uuid"

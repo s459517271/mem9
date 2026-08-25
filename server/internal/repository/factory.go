@@ -37,6 +37,18 @@ func NewTenantRepo(backend string, db *sql.DB) TenantRepo {
 	}
 }
 
+// NewSpaceChainRepo creates a SpaceChainRepo for the specified backend.
+func NewSpaceChainRepo(backend string, db *sql.DB) SpaceChainRepo {
+	switch backend {
+	case "db9":
+		return db9.NewSpaceChainRepo(db)
+	case "postgres":
+		return postgres.NewSpaceChainRepo(db)
+	default:
+		return tidb.NewSpaceChainRepo(db)
+	}
+}
+
 // NewUploadTaskRepo creates an UploadTaskRepo for the specified backend.
 func NewUploadTaskRepo(backend string, db *sql.DB) UploadTaskRepo {
 	switch backend {
@@ -96,8 +108,20 @@ func NewSessionRepo(backend string, db *sql.DB, autoModel string, ftsEnabled boo
 type stubSessionRepo struct{}
 
 func (stubSessionRepo) BulkCreate(_ context.Context, _ []*domain.Session) error { return nil }
-func (stubSessionRepo) PatchTags(_ context.Context, _, _ string, _ []string) error {
+func (stubSessionRepo) PatchTags(_ context.Context, _, _, _ string, _ []string) error {
 	return nil
+}
+func (stubSessionRepo) GetByID(_ context.Context, _ string) (*domain.Memory, error) {
+	return nil, fmt.Errorf("session memory: %w", domain.ErrNotSupported)
+}
+func (stubSessionRepo) List(_ context.Context, _ domain.MemoryFilter) ([]domain.Memory, int, error) {
+	return nil, 0, fmt.Errorf("session memories: %w", domain.ErrNotSupported)
+}
+func (stubSessionRepo) SoftDelete(_ context.Context, _, _ string) (int64, error) {
+	return 0, fmt.Errorf("session memory delete: %w", domain.ErrNotSupported)
+}
+func (stubSessionRepo) BulkSoftDelete(_ context.Context, _ []string, _ string) (int64, error) {
+	return 0, fmt.Errorf("session memory batch delete: %w", domain.ErrNotSupported)
 }
 func (stubSessionRepo) AutoVectorSearch(_ context.Context, _ string, _ domain.MemoryFilter, _ int) ([]domain.Memory, error) {
 	return nil, domain.ErrAutoVectorSearchSkipped
@@ -112,6 +136,18 @@ func (stubSessionRepo) KeywordSearch(_ context.Context, _ string, _ domain.Memor
 	return nil, nil
 }
 func (stubSessionRepo) FTSAvailable() bool { return false }
-func (stubSessionRepo) ListBySessionIDs(_ context.Context, _ []string, _ int) ([]*domain.Session, error) {
+func (stubSessionRepo) ListBySessionIDs(_ context.Context, _ []string, _ *string, _ int) ([]*domain.Session, error) {
 	return nil, fmt.Errorf("session messages: %w", domain.ErrNotSupported)
+}
+func (stubSessionRepo) UpsertSessionEdit(_ context.Context, _ *domain.SessionEdit) error {
+	return fmt.Errorf("session edit: %w", domain.ErrNotSupported)
+}
+func (stubSessionRepo) GetSessionEdit(_ context.Context, _ string) (*domain.SessionEdit, error) {
+	return nil, fmt.Errorf("session edit: %w", domain.ErrNotSupported)
+}
+func (stubSessionRepo) GetSessionEditsByIDs(_ context.Context, _ []string) (map[string]*domain.SessionEdit, error) {
+	return nil, fmt.Errorf("session edit: %w", domain.ErrNotSupported)
+}
+func (stubSessionRepo) DeleteSessionEdit(_ context.Context, _ string) (int64, error) {
+	return 0, fmt.Errorf("session edit: %w", domain.ErrNotSupported)
 }

@@ -38,6 +38,7 @@ type Memory struct {
 
 	AgentID      string `json:"agent_id,omitempty"`
 	SessionID    string `json:"session_id,omitempty"`
+	AppID        string `json:"appId,omitempty"`
 	UpdatedBy    string `json:"updated_by,omitempty"`
 	SupersededBy string `json:"superseded_by,omitempty"`
 
@@ -53,6 +54,19 @@ type Memory struct {
 	// RelativeAge is a human-readable recency string (e.g. "3 days ago").
 	// Populated server-side at query time for search results only; never stored.
 	RelativeAge string `json:"relative_age,omitempty"`
+
+	// ChainSource is populated only when the response was produced through a Space Chain.
+	ChainSource *ChainSource `json:"chain_source,omitempty"`
+}
+
+const ChainKeyPrefix = "chain_"
+
+// ChainSource identifies which Space Chain node produced a response item.
+type ChainSource struct {
+	ChainID         string `json:"chain_id"`
+	NodePosition    int    `json:"node_position"`
+	TenantID        string `json:"tenant_id"`
+	ExternalSpaceID string `json:"external_space_id,omitempty"`
 }
 
 type AuthInfo struct {
@@ -62,6 +76,72 @@ type AuthInfo struct {
 	TenantID  string
 	TenantDB  *sql.DB
 	ClusterID string
+
+	// APIKeySubject is the billing/quota subject passed to runtime usage
+	// service APIs. It must not be logged raw.
+	APIKeySubject string
+
+	// Chain is non-nil when X-API-Key resolved to a Space Chain key.
+	Chain *ChainAuth
+}
+
+func (a *AuthInfo) IsChain() bool {
+	return a != nil && a.Chain != nil
+}
+
+// ChainAuth is request auth material resolved from a chain_ API key.
+type ChainAuth struct {
+	ChainID string
+	APIKey  string
+	Nodes   []ChainAuthNode
+}
+
+// ChainAuthNode is a resolved Space Chain node with an open tenant DB handle.
+type ChainAuthNode struct {
+	SpaceChainNode
+	TenantDB  *sql.DB
+	ClusterID string
+}
+
+// SpaceChain is the control-plane source of truth for an ordered chain of Spaces.
+type SpaceChain struct {
+	ID              string     `json:"id"`
+	ProjectID       string     `json:"project_id,omitempty"`
+	Name            string     `json:"name"`
+	Description     string     `json:"description,omitempty"`
+	CreatedByUserID string     `json:"created_by_user_id,omitempty"`
+	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
+	DeletedByUserID string     `json:"deleted_by_user_id,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+
+	Bindings []SpaceChainBinding `json:"bindings,omitempty"`
+	Nodes    []SpaceChainNode    `json:"nodes,omitempty"`
+}
+
+type SpaceChainBinding struct {
+	ID               string     `json:"id"`
+	ChainID          string     `json:"chain_id"`
+	ChainAPIKey      string     `json:"chain_api_key,omitempty"`
+	CreatedByUserID  string     `json:"created_by_user_id,omitempty"`
+	Disabled         bool       `json:"disabled"`
+	DisabledAt       *time.Time `json:"disabled_at,omitempty"`
+	DisabledByUserID string     `json:"disabled_by_user_id,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+}
+
+type SpaceChainNode struct {
+	ID                       string    `json:"id"`
+	ChainID                  string    `json:"chain_id"`
+	TenantID                 string    `json:"tenant_id"`
+	ExternalSpaceID          string    `json:"external_space_id,omitempty"`
+	DisplayName              string    `json:"display_name,omitempty"`
+	Position                 int       `json:"position"`
+	RoutingPolicyEnabled     bool      `json:"routing_policy_enabled"`
+	RoutingPolicyPrompt      string    `json:"routing_policy_prompt,omitempty"`
+	RoutingPolicyWebhookOnly bool      `json:"routing_policy_webhook_only"`
+	CreatedAt                time.Time `json:"created_at"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 // MemoryFilter encapsulates search/list query parameters.
@@ -73,9 +153,19 @@ type MemoryFilter struct {
 	MemoryType string
 	AgentID    string
 	SessionID  string
+	AppID      *string
+	SortBy     string
+	SortDir    string
 	Limit      int
 	Offset     int
+	ScanAll    bool
 	MinScore   float64 // minimum cosine similarity for vector results; 0 = use default (0.3); -1 = disabled (return all)
+	// CreatedAfter / CreatedBefore bound results to a created_at window
+	// (closed interval). nil = unbounded on that side. Currently consumed
+	// only by the raw-session search/list path (buildSessionFilterConds);
+	// other pools ignore them so normal memory search is unchanged.
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
 }
 
 // TenantStatus represents the lifecycle status of a tenant.
@@ -86,6 +176,14 @@ const (
 	TenantActive       TenantStatus = "active"
 	TenantSuspended    TenantStatus = "suspended"
 	TenantDeleted      TenantStatus = "deleted"
+)
+
+// KeyStatus is the normalized API-key validation result exposed to console.
+type KeyStatus string
+
+const (
+	KeyStatusActive   KeyStatus = "active"
+	KeyStatusInactive KeyStatus = "inactive"
 )
 
 // Tenant represents a provisioned customer with a dedicated database.
@@ -168,6 +266,7 @@ type Session struct {
 	ID          string      `json:"id"`
 	SessionID   string      `json:"session_id,omitempty"`
 	AgentID     string      `json:"agent_id,omitempty"`
+	AppID       string      `json:"appId,omitempty"`
 	Source      string      `json:"source,omitempty"`
 	Seq         int         `json:"seq"`
 	Role        string      `json:"role"`
@@ -179,4 +278,31 @@ type Session struct {
 	State       MemoryState `json:"state"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
+// SessionEdit is a display overlay for a single raw session row. It is a
+// current-overlay record (at most one per session row; ID == sessions.id),
+// not an audit history: re-editing the same row upserts this one row and
+// bumps Version. The sessions table is never modified, so the overlay only
+// changes how Session Search renders an already-matched row.
+type SessionEdit struct {
+	ID              string   `json:"id"` // == sessions.id
+	AppID           string   `json:"appId,omitempty"`
+	SessionID       string   `json:"session_id,omitempty"`
+	Seq             int      `json:"seq"`
+	AgentID         string   `json:"agent_id,omitempty"`
+	OriginalContent string   `json:"original_content"`
+	EditedContent   string   `json:"edited_content"`
+	EditedTags      []string `json:"edited_tags,omitempty"`
+	// EditedTagsSet distinguishes "tags omitted (leave display tags as-is)"
+	// from "tags explicitly set (including [] to clear)". It mirrors whether
+	// the edited_tags column is non-NULL; only when true does the overlay
+	// replace a row's rendered tags.
+	EditedTagsSet bool        `json:"-"`
+	EditedBy      string      `json:"edited_by,omitempty"`
+	Reason        string      `json:"reason,omitempty"`
+	Version       int         `json:"version"`
+	State         MemoryState `json:"state"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 }

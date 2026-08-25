@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/qiffang/mnemos/server/internal/domain"
@@ -37,6 +39,12 @@ type TenantService struct {
 	encryptor   encrypt.Encryptor
 }
 
+type APIKeyStatusResult struct {
+	Status    domain.KeyStatus
+	TenantID  string
+	ClusterID string
+}
+
 func NewTenantService(
 	tenants repository.TenantRepo,
 	provisioner tenant.Provisioner,
@@ -64,6 +72,63 @@ func NewTenantService(
 func (s *TenantService) WithUTMRepo(r utmRepo) *TenantService {
 	s.utms = r
 	return s
+}
+
+// KeyStatus validates a candidate API key against the control-plane tenant row.
+func (s *TenantService) KeyStatus(ctx context.Context, apiKey string) (domain.KeyStatus, error) {
+	result, err := s.ResolveAPIKeyStatus(ctx, apiKey)
+	if err != nil {
+		return "", err
+	}
+	return result.Status, nil
+}
+
+func (s *TenantService) ResolveAPIKeyStatus(ctx context.Context, apiKey string) (APIKeyStatusResult, error) {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return APIKeyStatusResult{}, &domain.ValidationError{Field: "X-API-Key", Message: "missing or malformed X-API-Key"}
+	}
+	if s.tenants == nil {
+		return APIKeyStatusResult{}, fmt.Errorf("tenant repository not configured")
+	}
+
+	t, err := s.tenants.GetByID(ctx, apiKey)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return APIKeyStatusResult{}, domain.ErrNotFound
+		}
+		return APIKeyStatusResult{}, fmt.Errorf("get tenant for key status: %w", err)
+	}
+
+	if t.DeletedAt != nil {
+		if t.Status != domain.TenantDeleted && s.logger != nil {
+			s.logger.WarnContext(ctx, "tenant deleted_at set with non-deleted status",
+				"status", t.Status,
+			)
+		}
+		return APIKeyStatusResult{}, domain.ErrNotFound
+	}
+
+	result := APIKeyStatusResult{
+		TenantID:  t.ID,
+		ClusterID: t.ClusterID,
+	}
+	switch t.Status {
+	case domain.TenantActive:
+		result.Status = domain.KeyStatusActive
+	case domain.TenantProvisioning, domain.TenantSuspended:
+		result.Status = domain.KeyStatusInactive
+	case domain.TenantDeleted:
+		return APIKeyStatusResult{}, domain.ErrNotFound
+	default:
+		if s.logger != nil {
+			s.logger.WarnContext(ctx, "unknown tenant status for key status",
+				"status", t.Status,
+			)
+		}
+		result.Status = domain.KeyStatusInactive
+	}
+	return result, nil
 }
 
 // ProvisionResult is the output of Provision.
@@ -292,35 +357,25 @@ func (s *TenantService) GetInfo(ctx context.Context, tenantID string) (*domain.T
 	}, nil
 }
 
-func (s *TenantService) EnsureSessionsTable(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, tenant.BuildSessionsSchema(s.autoModel, s.autoDims, s.clientDims)); err != nil {
-		return fmt.Errorf("ensure sessions table: create: %w", err)
+func (s *TenantService) EnsureRuntimeSchema(ctx context.Context, db *sql.DB) error {
+	backend := "tidb"
+	if s.pool != nil {
+		backend = s.pool.Backend()
 	}
-	if s.autoModel != "" {
-		exists, err := tenant.IndexExists(ctx, db, "sessions", "idx_sessions_cosine")
-		if err != nil {
-			return fmt.Errorf("ensure sessions table: check vector index: %w", err)
+	switch backend {
+	case "tidb":
+		if err := tenant.EnsureTiDBTenantRuntimeSchema(ctx, db, s.autoModel, s.autoDims, s.clientDims, s.ftsEnabled); err != nil {
+			return fmt.Errorf("ensure runtime schema: tidb: %w", err)
 		}
-		if !exists {
-			if _, err := db.ExecContext(ctx,
-				`ALTER TABLE sessions ADD VECTOR INDEX idx_sessions_cosine ((VEC_COSINE_DISTANCE(embedding))) ADD_COLUMNAR_REPLICA_ON_DEMAND`); err != nil && !tenant.IsIndexExistsError(err) {
-				return fmt.Errorf("ensure sessions table: vector index: %w", err)
-			}
+		return nil
+	case "postgres", "db9":
+		if err := tenant.ValidatePostgresMemoryRuntimeSchema(ctx, db, backend); err != nil {
+			return fmt.Errorf("ensure runtime schema: %s: %w", backend, err)
 		}
+		return nil
+	default:
+		return fmt.Errorf("ensure runtime schema: unsupported backend %q", backend)
 	}
-	if s.ftsEnabled {
-		exists, err := tenant.IndexExists(ctx, db, "sessions", "idx_sessions_fts")
-		if err != nil {
-			return fmt.Errorf("ensure sessions table: check fts index: %w", err)
-		}
-		if !exists {
-			if _, err := db.ExecContext(ctx,
-				`ALTER TABLE sessions ADD FULLTEXT INDEX idx_sessions_fts (content) WITH PARSER MULTILINGUAL ADD_COLUMNAR_REPLICA_ON_DEMAND`); err != nil && !tenant.IsIndexExistsError(err) {
-				return fmt.Errorf("ensure sessions table: fts index: %w", err)
-			}
-		}
-	}
-	return nil
 }
 
 func utmFromRequest(tenantID string, raw map[string]string) *domain.TenantUTM {
